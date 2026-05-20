@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -17,22 +18,37 @@ func TestApplyConfigDefaults(t *testing.T) {
 		{
 			name: "zero limit filled",
 			in:   Config{Limit: 0, Repos: []string{"a/b"}},
-			want: Config{Limit: 50, Repos: []string{"a/b"}},
+			want: Config{Limit: 50, Repos: []string{"a/b"}, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
 		},
 		{
 			name: "negative limit filled",
 			in:   Config{Limit: -1, Repos: []string{"a/b"}},
-			want: Config{Limit: 50, Repos: []string{"a/b"}},
+			want: Config{Limit: 50, Repos: []string{"a/b"}, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
 		},
 		{
 			name: "values preserved",
 			in:   Config{Limit: 7, Repos: []string{"a/b"}},
-			want: Config{Limit: 7, Repos: []string{"a/b"}},
+			want: Config{Limit: 7, Repos: []string{"a/b"}, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
 		},
 		{
 			name: "empty filled",
 			in:   Config{},
-			want: Config{Limit: 50},
+			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
+		},
+		{
+			name: "auto-fix label preserved",
+			in:   Config{Limit: 10, Repos: []string{"a/b"}, AutoFixLabel: "custom-label"},
+			want: Config{Limit: 10, Repos: []string{"a/b"}, AutoFixLabel: "custom-label", WorkDir: os.TempDir()},
+		},
+		{
+			name: "work_dir preserved",
+			in:   Config{Limit: 10, Repos: []string{"a/b"}, WorkDir: "/var/tmp"},
+			want: Config{Limit: 10, Repos: []string{"a/b"}, AutoFixLabel: defaultAutoFixLabel, WorkDir: "/var/tmp"},
+		},
+		{
+			name: "auto_fix_ci flag preserved",
+			in:   Config{Limit: 10, Repos: []string{"a/b"}, AutoFixCI: true},
+			want: Config{Limit: 10, Repos: []string{"a/b"}, AutoFixCI: true, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
 		},
 	}
 

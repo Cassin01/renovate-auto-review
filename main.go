@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 const defaultMarker = "<!-- claude-auto-mergeable-check -->"
@@ -60,7 +61,7 @@ func runAll(cfg *Config, dryRun bool) error {
 	var totalProcessed, totalSkipped, totalFailed int
 	for _, repo := range cfg.Repos {
 		fmt.Fprintf(os.Stdout, "\n###### %s ######\n", repo)
-		p, s, f := processRepo(claudeBin, repo, defaultMarker, cfg.Limit, dryRun)
+		p, s, f := processRepo(claudeBin, repo, defaultMarker, cfg, dryRun)
 		totalProcessed += p
 		totalSkipped += s
 		totalFailed += f
@@ -74,8 +75,8 @@ func runAll(cfg *Config, dryRun bool) error {
 	return nil
 }
 
-func processRepo(claudeBin, repo, marker string, limit int, dryRun bool) (processed, skipped, failed int) {
-	prs, err := listOpenPRs(repo, limit)
+func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool) (processed, skipped, failed int) {
+	prs, err := listOpenPRs(repo, cfg.Limit)
 	if err != nil {
 		log.Printf("%s: list PRs: %v", repo, err)
 		return 0, 0, 1
@@ -125,6 +126,54 @@ func processRepo(claudeBin, repo, marker string, limit int, dryRun bool) (proces
 			continue
 		}
 		processed++
+
+		if cfg.AutoFixCI || hasAutoFixLabel(pr, cfg.AutoFixLabel) {
+			if err := tryFixCI(claudeBin, repo, marker, cfg, pr); err != nil {
+				log.Printf("%s #%d: auto-fix: %v", repo, pr.Number, err)
+				failed++
+			}
+		}
 	}
 	return processed, skipped, failed
+}
+
+func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR) error {
+	checks, err := fetchPRChecks(repo, pr.Number)
+	if err != nil {
+		return fmt.Errorf("fetch checks: %w", err)
+	}
+	if !hasFailingChecks(checks) {
+		fmt.Fprintln(os.Stdout, "auto-fix: no failing checks, skip")
+		return nil
+	}
+
+	runIDs := pickFailedRunIDs(checks)
+	var logs strings.Builder
+	for _, id := range runIDs {
+		log, err := fetchFailedRunLog(repo, id)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warn: fetch run %s log: %v\n", id, err)
+			continue
+		}
+		fmt.Fprintf(&logs, "===== run %s =====\n%s\n", id, log)
+	}
+	if logs.Len() == 0 {
+		fmt.Fprintln(os.Stdout, "auto-fix: failing checks present but no Actions log available (e.g. renovate-side status). Skipping.")
+		return nil
+	}
+
+	workDir, err := os.MkdirTemp(cfg.WorkDir, fmt.Sprintf("rar-%d-", pr.Number))
+	if err != nil {
+		return fmt.Errorf("mkdir workdir: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+	fmt.Fprintf(os.Stdout, "auto-fix: workDir=%s, failing checks=%d\n", workDir, len(runIDs))
+
+	res, err := runClaudeFixMode(claudeBin, repo, pr.Number, pr.HeadRefName, marker, workDir, logs.String())
+	if res != nil && res.Stdout != "" {
+		fmt.Fprintln(os.Stdout, "--- claude fix output ---")
+		fmt.Fprintln(os.Stdout, res.Stdout)
+		fmt.Fprintln(os.Stdout, "--- end ---")
+	}
+	return err
 }

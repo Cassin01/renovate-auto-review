@@ -52,3 +52,63 @@ func TestBuildPrompt(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildFixPrompt(t *testing.T) {
+	cases := []struct {
+		name     string
+		repo     string
+		prNumber int
+		headRef  string
+		marker   string
+		workDir  string
+		logs     string
+	}{
+		{
+			name: "typical", repo: "owner/repo", prNumber: 42,
+			headRef: "renovate/foo", marker: "<!-- m -->",
+			workDir: "/tmp/rar-42-abc", logs: "error: something broke",
+		},
+		{
+			name: "empty logs", repo: "o/r", prNumber: 1,
+			headRef: "renovate/bar", marker: "<!-- claude-auto-mergeable-check -->",
+			workDir: "/tmp/x", logs: "",
+		},
+		{
+			name: "large pr number", repo: "x/y", prNumber: 99999,
+			headRef: "renovate/baz", marker: "M",
+			workDir: "/var/tmp/rar", logs: strings.Repeat("a", 1000),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildFixPrompt(tc.repo, tc.prNumber, tc.headRef, tc.marker, tc.workDir, tc.logs)
+
+			for _, want := range []string{
+				tc.repo, tc.headRef, tc.marker, tc.workDir,
+				strconv.Itoa(tc.prNumber),
+				"絶対遵守",
+				"amend",
+				"force",
+				"rebase checkbox",
+				"フォールバック",
+				"PUSHED",
+				"POSTED",
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("expected substring %q not found", want)
+				}
+			}
+
+			if tc.logs != "" && !strings.Contains(got, tc.logs) {
+				t.Errorf("expected logs to be embedded")
+			}
+
+			for _, bad := range []string{"%!s(MISSING)", "%!d(MISSING)", "%!(EXTRA"} {
+				if strings.Contains(got, bad) {
+					t.Errorf("unexpected format error marker %q present", bad)
+				}
+			}
+		})
+	}
+}

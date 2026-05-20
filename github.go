@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -110,6 +111,110 @@ func shouldSkipReview(comments []Comment, commits []Commit, marker string) bool 
 		}
 	}
 	return !lastCommitAt.After(lastMarkerAt)
+}
+
+type CheckRun struct {
+	Name         string `json:"name"`
+	Conclusion   string `json:"conclusion"`
+	Status       string `json:"status"`
+	DetailsURL   string `json:"detailsUrl"`
+	WorkflowName string `json:"workflowName"`
+}
+
+func fetchPRChecks(repo string, prNumber int) ([]CheckRun, error) {
+	out, err := exec.Command(
+		"gh", "pr", "view", strconv.Itoa(prNumber),
+		"--repo", repo,
+		"--json", "statusCheckRollup",
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh pr view statusCheckRollup: %w (stderr: %s)", err, stderrOf(err))
+	}
+	var data struct {
+		StatusCheckRollup []CheckRun `json:"statusCheckRollup"`
+	}
+	if err := json.Unmarshal(out, &data); err != nil {
+		return nil, fmt.Errorf("decode statusCheckRollup: %w", err)
+	}
+	return data.StatusCheckRollup, nil
+}
+
+// hasFailingChecks reports whether any completed check ended in a non-success
+// state. Pending or in-progress runs are ignored.
+func hasFailingChecks(checks []CheckRun) bool {
+	for _, c := range checks {
+		if c.Status != "" && c.Status != "COMPLETED" {
+			continue
+		}
+		switch strings.ToUpper(c.Conclusion) {
+		case "FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE":
+			return true
+		}
+	}
+	return false
+}
+
+var runIDRegexp = regexp.MustCompile(`/actions/runs/(\d+)`)
+
+// pickFailedRunIDs returns deduplicated GitHub Actions run IDs extracted from
+// DetailsURL of failed checks. Non-Actions URLs (e.g. Renovate status contexts
+// with empty targetUrl) are ignored.
+func pickFailedRunIDs(checks []CheckRun) []string {
+	seen := make(map[string]struct{})
+	var ids []string
+	for _, c := range checks {
+		if c.Status != "" && c.Status != "COMPLETED" {
+			continue
+		}
+		switch strings.ToUpper(c.Conclusion) {
+		case "FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE":
+		default:
+			continue
+		}
+		m := runIDRegexp.FindStringSubmatch(c.DetailsURL)
+		if len(m) < 2 {
+			continue
+		}
+		if _, ok := seen[m[1]]; ok {
+			continue
+		}
+		seen[m[1]] = struct{}{}
+		ids = append(ids, m[1])
+	}
+	return ids
+}
+
+func hasAutoFixLabel(pr PR, label string) bool {
+	if label == "" {
+		return false
+	}
+	for _, l := range pr.Labels {
+		if l.Name == label {
+			return true
+		}
+	}
+	return false
+}
+
+const maxFailedLogBytes = 50_000
+
+func fetchFailedRunLog(repo, runID string) (string, error) {
+	out, err := exec.Command(
+		"gh", "run", "view", runID,
+		"--repo", repo,
+		"--log-failed",
+	).Output()
+	if err != nil {
+		return "", fmt.Errorf("gh run view %s --log-failed: %w (stderr: %s)", runID, err, stderrOf(err))
+	}
+	return tailBytes(string(out), maxFailedLogBytes), nil
+}
+
+func tailBytes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return "... (truncated) ...\n" + s[len(s)-max:]
 }
 
 func stderrOf(err error) string {

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os/exec"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -146,6 +147,211 @@ func TestShouldSkipReview(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := shouldSkipReview(tc.comments, tc.commits, marker); got != tc.want {
 				t.Errorf("shouldSkipReview() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHasFailingChecks(t *testing.T) {
+	cases := []struct {
+		name   string
+		checks []CheckRun
+		want   bool
+	}{
+		{"empty", nil, false},
+		{
+			name: "all success",
+			checks: []CheckRun{
+				{Name: "lint", Conclusion: "SUCCESS", Status: "COMPLETED"},
+				{Name: "test", Conclusion: "SUCCESS", Status: "COMPLETED"},
+			},
+			want: false,
+		},
+		{
+			name: "one failure",
+			checks: []CheckRun{
+				{Name: "lint", Conclusion: "FAILURE", Status: "COMPLETED"},
+				{Name: "test", Conclusion: "SUCCESS", Status: "COMPLETED"},
+			},
+			want: true,
+		},
+		{
+			name: "cancelled counts as failure",
+			checks: []CheckRun{
+				{Name: "test", Conclusion: "CANCELLED", Status: "COMPLETED"},
+			},
+			want: true,
+		},
+		{
+			name: "in_progress ignored",
+			checks: []CheckRun{
+				{Name: "test", Conclusion: "", Status: "IN_PROGRESS"},
+			},
+			want: false,
+		},
+		{
+			name: "mixed in_progress and failure",
+			checks: []CheckRun{
+				{Name: "lint", Conclusion: "", Status: "IN_PROGRESS"},
+				{Name: "test", Conclusion: "FAILURE", Status: "COMPLETED"},
+			},
+			want: true,
+		},
+		{
+			name: "lowercase conclusion handled",
+			checks: []CheckRun{
+				{Name: "x", Conclusion: "failure", Status: "COMPLETED"},
+			},
+			want: true,
+		},
+		{
+			name: "neutral not counted",
+			checks: []CheckRun{
+				{Name: "x", Conclusion: "NEUTRAL", Status: "COMPLETED"},
+			},
+			want: false,
+		},
+		{
+			name: "status empty (StatusContext) failure",
+			checks: []CheckRun{
+				{Name: "renovate/artifacts", Conclusion: "FAILURE", Status: ""},
+			},
+			want: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasFailingChecks(tc.checks); got != tc.want {
+				t.Errorf("hasFailingChecks() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPickFailedRunIDs(t *testing.T) {
+	cases := []struct {
+		name   string
+		checks []CheckRun
+		want   []string
+	}{
+		{"empty", nil, nil},
+		{
+			name: "extract single",
+			checks: []CheckRun{
+				{
+					Conclusion: "FAILURE", Status: "COMPLETED",
+					DetailsURL: "https://github.com/o/r/actions/runs/12345/job/678",
+				},
+			},
+			want: []string{"12345"},
+		},
+		{
+			name: "dedupe same run multiple jobs",
+			checks: []CheckRun{
+				{Conclusion: "FAILURE", Status: "COMPLETED", DetailsURL: "https://github.com/o/r/actions/runs/100/job/1"},
+				{Conclusion: "FAILURE", Status: "COMPLETED", DetailsURL: "https://github.com/o/r/actions/runs/100/job/2"},
+				{Conclusion: "FAILURE", Status: "COMPLETED", DetailsURL: "https://github.com/o/r/actions/runs/200/job/3"},
+			},
+			want: []string{"100", "200"},
+		},
+		{
+			name: "ignore success",
+			checks: []CheckRun{
+				{Conclusion: "SUCCESS", Status: "COMPLETED", DetailsURL: "https://github.com/o/r/actions/runs/999/job/1"},
+				{Conclusion: "FAILURE", Status: "COMPLETED", DetailsURL: "https://github.com/o/r/actions/runs/111/job/2"},
+			},
+			want: []string{"111"},
+		},
+		{
+			name: "ignore non-actions URL (renovate/artifacts)",
+			checks: []CheckRun{
+				{Conclusion: "FAILURE", Status: "", DetailsURL: ""},
+			},
+			want: nil,
+		},
+		{
+			name: "ignore in_progress",
+			checks: []CheckRun{
+				{Conclusion: "", Status: "IN_PROGRESS", DetailsURL: "https://github.com/o/r/actions/runs/777/job/1"},
+			},
+			want: nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := pickFailedRunIDs(tc.checks)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("pickFailedRunIDs() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHasAutoFixLabel(t *testing.T) {
+	cases := []struct {
+		name  string
+		pr    PR
+		label string
+		want  bool
+	}{
+		{
+			name:  "match",
+			pr:    PR{Labels: []Label{{Name: "renovate"}, {Name: "claude-auto-fix"}}},
+			label: "claude-auto-fix",
+			want:  true,
+		},
+		{
+			name:  "no labels",
+			pr:    PR{},
+			label: "claude-auto-fix",
+			want:  false,
+		},
+		{
+			name:  "different label",
+			pr:    PR{Labels: []Label{{Name: "renovate"}}},
+			label: "claude-auto-fix",
+			want:  false,
+		},
+		{
+			name:  "case sensitive",
+			pr:    PR{Labels: []Label{{Name: "Claude-Auto-Fix"}}},
+			label: "claude-auto-fix",
+			want:  false,
+		},
+		{
+			name:  "empty label opts out",
+			pr:    PR{Labels: []Label{{Name: ""}}},
+			label: "",
+			want:  false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasAutoFixLabel(tc.pr, tc.label); got != tc.want {
+				t.Errorf("hasAutoFixLabel() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTailBytes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		max  int
+		want string
+	}{
+		{"short", "hello", 100, "hello"},
+		{"exact", "hello", 5, "hello"},
+		{"truncated", "0123456789", 4, "... (truncated) ...\n6789"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tailBytes(tc.in, tc.max); got != tc.want {
+				t.Errorf("tailBytes() = %q, want %q", got, tc.want)
 			}
 		})
 	}

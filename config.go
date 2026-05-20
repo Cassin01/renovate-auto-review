@@ -12,11 +12,16 @@ import (
 )
 
 type Config struct {
-	Limit int      `toml:"limit"`
-	Repos []string `toml:"repos"`
+	Limit         int      `toml:"limit"`
+	Repos         []string `toml:"repos"`
+	AutoFixCI     bool     `toml:"auto_fix_ci"`
+	AutoFixLabel  string   `toml:"auto_fix_label"`
+	WorkDir       string   `toml:"work_dir"`
 
 	SourcePath string `toml:"-"`
 }
+
+const defaultAutoFixLabel = "claude-auto-fix"
 
 func defaultConfigPath() (string, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
@@ -57,6 +62,12 @@ func applyConfigDefaults(cfg *Config) {
 	if cfg.Limit <= 0 {
 		cfg.Limit = 50
 	}
+	if cfg.AutoFixLabel == "" {
+		cfg.AutoFixLabel = defaultAutoFixLabel
+	}
+	if cfg.WorkDir == "" {
+		cfg.WorkDir = os.TempDir()
+	}
 }
 
 func validateConfig(cfg *Config) error {
@@ -88,4 +99,15 @@ limit = 50
 repos = [
   "Cassin01/multi_agent_control_tower",
 ]
+
+# CI 失敗時に Claude に修正を試みさせる (default false)
+# true にすると repo 内全 Renovate PR が対象。PR 単位の opt-in を使う場合は false のまま
+# auto_fix_label を PR に付与する。
+auto_fix_ci = false
+
+# CI 自動修正の opt-in ラベル名 (default "claude-auto-fix")
+# auto_fix_label = "claude-auto-fix"
+
+# CI 自動修正時の作業ディレクトリ親パス (default os.TempDir())
+# work_dir = "/tmp"
 `
