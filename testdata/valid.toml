@@ -1,0 +1,6 @@
+marker = "<!-- custom-marker -->"
+limit = 10
+repos = [
+  "owner/a",
+  "owner/b",
+]
