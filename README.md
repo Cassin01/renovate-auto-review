@@ -1,5 +1,7 @@
 # renovate-auto-review
 
+[![CI](https://github.com/Cassin01/renovate-auto-review/actions/workflows/ci.yml/badge.svg)](https://github.com/Cassin01/renovate-auto-review/actions/workflows/ci.yml)
+
 設定ファイルに列挙した GitHub リポジトリの Open Renovate PR を抽出し、各 PR
 ごとに `claude --permission-mode auto` (Claude auto mode) を起動して、PR が
 マージ可能かを Claude 自身に判断させて GitHub にコメント投稿させる Go スクリプト。
