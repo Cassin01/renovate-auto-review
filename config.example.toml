@@ -1,0 +1,14 @@
+# auto_approve config — copy to ~/.config/auto_approve/config.toml and edit.
+# XDG_CONFIG_HOME が設定されていれば $XDG_CONFIG_HOME/auto_approve/config.toml が優先される。
+
+# Claude 投稿コメントを重複検出するためのマーカー (省略可)
+marker = "<!-- claude-auto-mergeable-check -->"
+
+# gh pr list --limit に渡す値 (省略可)
+limit = 50
+
+# 対象 GitHub リポジトリ (owner/name)
+repos = [
+  "Cassin01/multi_agent_control_tower",
+  # "owner/another-repo",
+]
