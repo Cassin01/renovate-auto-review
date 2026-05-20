@@ -54,13 +54,13 @@ func runAll(cfg *Config, dryRun bool) error {
 		return fmt.Errorf("gh CLI not found in PATH: %w", err)
 	}
 
-	fmt.Fprintf(os.Stdout, "config: %s\nrepos: %d, marker: %q, limit: %d\n",
-		cfg.SourcePath, len(cfg.Repos), cfg.Marker, cfg.Limit)
+	fmt.Fprintf(os.Stdout, "config: %s\nrepos: %d, limit: %d\n",
+		cfg.SourcePath, len(cfg.Repos), cfg.Limit)
 
 	var totalProcessed, totalSkipped, totalFailed int
 	for _, repo := range cfg.Repos {
 		fmt.Fprintf(os.Stdout, "\n###### %s ######\n", repo)
-		p, s, f := processRepo(claudeBin, repo, cfg.Marker, cfg.Limit, dryRun)
+		p, s, f := processRepo(claudeBin, repo, defaultMarker, cfg.Limit, dryRun)
 		totalProcessed += p
 		totalSkipped += s
 		totalFailed += f

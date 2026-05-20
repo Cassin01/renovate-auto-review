@@ -15,29 +15,24 @@ func TestApplyConfigDefaults(t *testing.T) {
 		want Config
 	}{
 		{
-			name: "empty marker filled",
-			in:   Config{Marker: "", Limit: 10, Repos: []string{"a/b"}},
-			want: Config{Marker: defaultMarker, Limit: 10, Repos: []string{"a/b"}},
-		},
-		{
 			name: "zero limit filled",
-			in:   Config{Marker: "x", Limit: 0, Repos: []string{"a/b"}},
-			want: Config{Marker: "x", Limit: 50, Repos: []string{"a/b"}},
+			in:   Config{Limit: 0, Repos: []string{"a/b"}},
+			want: Config{Limit: 50, Repos: []string{"a/b"}},
 		},
 		{
 			name: "negative limit filled",
-			in:   Config{Marker: "x", Limit: -1, Repos: []string{"a/b"}},
-			want: Config{Marker: "x", Limit: 50, Repos: []string{"a/b"}},
+			in:   Config{Limit: -1, Repos: []string{"a/b"}},
+			want: Config{Limit: 50, Repos: []string{"a/b"}},
 		},
 		{
 			name: "values preserved",
-			in:   Config{Marker: "x", Limit: 7, Repos: []string{"a/b"}},
-			want: Config{Marker: "x", Limit: 7, Repos: []string{"a/b"}},
+			in:   Config{Limit: 7, Repos: []string{"a/b"}},
+			want: Config{Limit: 7, Repos: []string{"a/b"}},
 		},
 		{
-			name: "both empty filled",
+			name: "empty filled",
 			in:   Config{},
-			want: Config{Marker: defaultMarker, Limit: 50},
+			want: Config{Limit: 50},
 		},
 	}
 
@@ -110,9 +105,6 @@ func TestLoadConfig(t *testing.T) {
 		if err != nil {
 			t.Fatalf("loadConfig: %v", err)
 		}
-		if cfg.Marker != "<!-- custom-marker -->" {
-			t.Errorf("Marker = %q, want %q", cfg.Marker, "<!-- custom-marker -->")
-		}
 		if cfg.Limit != 10 {
 			t.Errorf("Limit = %d, want 10", cfg.Limit)
 		}
@@ -128,9 +120,6 @@ func TestLoadConfig(t *testing.T) {
 		cfg, err := loadConfig(filepath.Join("testdata", "defaults.toml"))
 		if err != nil {
 			t.Fatalf("loadConfig: %v", err)
-		}
-		if cfg.Marker != defaultMarker {
-			t.Errorf("Marker = %q, want default %q", cfg.Marker, defaultMarker)
 		}
 		if cfg.Limit != 50 {
 			t.Errorf("Limit = %d, want 50", cfg.Limit)
@@ -186,9 +175,6 @@ func TestLoadConfig(t *testing.T) {
 		cfg, err := loadConfig(filepath.Join("testdata", "unknown-keys.toml"))
 		if err != nil {
 			t.Fatalf("loadConfig: %v", err)
-		}
-		if cfg.Marker != "<!-- m -->" {
-			t.Errorf("Marker = %q", cfg.Marker)
 		}
 		if cfg.Limit != 5 {
 			t.Errorf("Limit = %d", cfg.Limit)

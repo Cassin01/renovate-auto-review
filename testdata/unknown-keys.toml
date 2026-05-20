@@ -1,4 +1,3 @@
-marker = "<!-- m -->"
 limit = 5
 repos = ["owner/repo"]
 foo = "bar"

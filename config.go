@@ -12,9 +12,8 @@ import (
 )
 
 type Config struct {
-	Marker string   `toml:"marker"`
-	Limit  int      `toml:"limit"`
-	Repos  []string `toml:"repos"`
+	Limit int      `toml:"limit"`
+	Repos []string `toml:"repos"`
 
 	SourcePath string `toml:"-"`
 }
@@ -55,9 +54,6 @@ func loadConfig(path string) (*Config, error) {
 }
 
 func applyConfigDefaults(cfg *Config) {
-	if cfg.Marker == "" {
-		cfg.Marker = defaultMarker
-	}
 	if cfg.Limit <= 0 {
 		cfg.Limit = 50
 	}
@@ -84,9 +80,6 @@ func (e *configNotFoundError) Error() string {
 const sampleConfig = `# renovate-auto-review config (TOML)
 # 配置先: $XDG_CONFIG_HOME/renovate-auto-review/config.toml
 #         (デフォルトは ~/.config/renovate-auto-review/config.toml)
-
-# Claude 投稿コメントを重複検出するためのマーカー (省略可)
-marker = "<!-- claude-auto-mergeable-check -->"
 
 # gh pr list --limit に渡す値 (省略可)
 limit = 50
