@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os/exec"
 	"testing"
+	"time"
 )
 
 func TestIsRenovatePR(t *testing.T) {
@@ -63,6 +64,88 @@ func TestIsRenovatePR(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isRenovatePR(tc.pr); got != tc.want {
 				t.Errorf("isRenovatePR() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestShouldSkipReview(t *testing.T) {
+	const marker = "<!-- m -->"
+	t0 := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	earlier := t0.Add(-1 * time.Hour)
+	later := t0.Add(1 * time.Hour)
+
+	cases := []struct {
+		name     string
+		comments []Comment
+		commits  []Commit
+		want     bool
+	}{
+		{
+			name:     "no marker comment",
+			comments: []Comment{{Body: "lgtm", CreatedAt: t0}},
+			commits:  []Commit{{CommittedDate: t0}},
+			want:     false,
+		},
+		{
+			name:     "marker present, last commit older",
+			comments: []Comment{{Body: marker + "\nbody", CreatedAt: t0}},
+			commits:  []Commit{{CommittedDate: earlier}},
+			want:     true,
+		},
+		{
+			name:     "marker present, last commit newer",
+			comments: []Comment{{Body: marker + "\nbody", CreatedAt: t0}},
+			commits:  []Commit{{CommittedDate: later}},
+			want:     false,
+		},
+		{
+			name: "multiple marker comments use latest",
+			comments: []Comment{
+				{Body: marker + " old", CreatedAt: earlier},
+				{Body: marker + " new", CreatedAt: later},
+			},
+			commits: []Commit{{CommittedDate: t0}},
+			want:    true,
+		},
+		{
+			name: "multiple marker comments, commit after latest",
+			comments: []Comment{
+				{Body: marker + " old", CreatedAt: earlier},
+				{Body: marker + " mid", CreatedAt: t0},
+			},
+			commits: []Commit{{CommittedDate: later}},
+			want:    false,
+		},
+		{
+			name:     "marker and commit at same instant",
+			comments: []Comment{{Body: marker, CreatedAt: t0}},
+			commits:  []Commit{{CommittedDate: t0}},
+			want:     true,
+		},
+		{
+			name:     "no commits but marker present",
+			comments: []Comment{{Body: marker, CreatedAt: t0}},
+			commits:  nil,
+			want:     true,
+		},
+		{
+			name: "multiple commits, latest used",
+			comments: []Comment{
+				{Body: marker, CreatedAt: t0},
+			},
+			commits: []Commit{
+				{CommittedDate: earlier},
+				{CommittedDate: later},
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldSkipReview(tc.comments, tc.commits, marker); got != tc.want {
+				t.Errorf("shouldSkipReview() = %v, want %v", got, tc.want)
 			}
 		})
 	}

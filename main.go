@@ -101,14 +101,14 @@ func processRepo(claudeBin, repo, marker string, limit int, dryRun bool) (proces
 	for _, pr := range targets {
 		fmt.Fprintf(os.Stdout, "\n=== %s PR #%d: %s ===\n", repo, pr.Number, pr.Title)
 
-		exists, err := hasExistingClaudeComment(repo, pr.Number, marker)
+		comments, commits, err := fetchPRReviewState(repo, pr.Number)
 		if err != nil {
-			log.Printf("%s #%d: comment lookup failed: %v", repo, pr.Number, err)
+			log.Printf("%s #%d: review state lookup failed: %v", repo, pr.Number, err)
 			failed++
 			continue
 		}
-		if exists {
-			fmt.Fprintln(os.Stdout, "skip: marker already present")
+		if shouldSkipReview(comments, commits, marker) {
+			fmt.Fprintln(os.Stdout, "skip: marker present and no new commits since")
 			skipped++
 			continue
 		}

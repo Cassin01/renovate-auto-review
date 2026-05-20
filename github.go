@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Author struct {
@@ -25,6 +26,15 @@ type PR struct {
 	Mergeable   string  `json:"mergeable"`
 	HeadRefName string  `json:"headRefName"`
 	URL         string  `json:"url"`
+}
+
+type Comment struct {
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type Commit struct {
+	CommittedDate time.Time `json:"committedDate"`
 }
 
 const renovateLogin = "app/renovate"
@@ -60,17 +70,46 @@ func isRenovatePR(pr PR) bool {
 	return false
 }
 
-func hasExistingClaudeComment(repo string, prNumber int, marker string) (bool, error) {
+func fetchPRReviewState(repo string, prNumber int) ([]Comment, []Commit, error) {
 	out, err := exec.Command(
 		"gh", "pr", "view", strconv.Itoa(prNumber),
 		"--repo", repo,
-		"--json", "comments",
-		"--jq", ".comments[].body",
+		"--json", "comments,commits",
 	).Output()
 	if err != nil {
-		return false, fmt.Errorf("gh pr view comments: %w (stderr: %s)", err, stderrOf(err))
+		return nil, nil, fmt.Errorf("gh pr view comments,commits: %w (stderr: %s)", err, stderrOf(err))
 	}
-	return strings.Contains(string(out), marker), nil
+	var data struct {
+		Comments []Comment `json:"comments"`
+		Commits  []Commit  `json:"commits"`
+	}
+	if err := json.Unmarshal(out, &data); err != nil {
+		return nil, nil, fmt.Errorf("decode pr view: %w", err)
+	}
+	return data.Comments, data.Commits, nil
+}
+
+// shouldSkipReview reports whether the PR can be skipped: a marker-bearing
+// comment exists and no commit has been added after it.
+func shouldSkipReview(comments []Comment, commits []Commit, marker string) bool {
+	var lastMarkerAt time.Time
+	found := false
+	for _, c := range comments {
+		if strings.Contains(c.Body, marker) && c.CreatedAt.After(lastMarkerAt) {
+			lastMarkerAt = c.CreatedAt
+			found = true
+		}
+	}
+	if !found {
+		return false
+	}
+	var lastCommitAt time.Time
+	for _, c := range commits {
+		if c.CommittedDate.After(lastCommitAt) {
+			lastCommitAt = c.CommittedDate
+		}
+	}
+	return !lastCommitAt.After(lastMarkerAt)
 }
 
 func stderrOf(err error) string {

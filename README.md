@@ -73,7 +73,9 @@ go run . -config /path/to/other.toml
 ## 重複コメント防止
 
 各 PR の既存コメント本文に組込みのマーカー文字列
-(`<!-- claude-auto-mergeable-check -->`) が含まれていればスキップ。
+(`<!-- claude-auto-mergeable-check -->`) が含まれており、**かつそのコメント
+投稿以降に新しいコミットが PR に追加されていない場合のみ** スキップする。
+rebase や追加コミットで HEAD が動いた PR は自動的に再レビューされる。
 Claude が投稿するコメントは必ず先頭にこのマーカー (HTML コメント) を含む。
 
 ## 既知の制約
