@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -17,18 +16,18 @@ func TestApplyConfigDefaults(t *testing.T) {
 	}{
 		{
 			name: "zero limit filled",
-			in:   Config{Limit: 0, Repos: []string{"a/b"}},
-			want: Config{Limit: 50, Repos: []string{"a/b"}, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
+			in:   Config{Limit: 0},
+			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
 		},
 		{
 			name: "negative limit filled",
-			in:   Config{Limit: -1, Repos: []string{"a/b"}},
-			want: Config{Limit: 50, Repos: []string{"a/b"}, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
+			in:   Config{Limit: -1},
+			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
 		},
 		{
 			name: "values preserved",
-			in:   Config{Limit: 7, Repos: []string{"a/b"}},
-			want: Config{Limit: 7, Repos: []string{"a/b"}, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
+			in:   Config{Limit: 7},
+			want: Config{Limit: 7, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
 		},
 		{
 			name: "empty filled",
@@ -37,18 +36,18 @@ func TestApplyConfigDefaults(t *testing.T) {
 		},
 		{
 			name: "auto-fix label preserved",
-			in:   Config{Limit: 10, Repos: []string{"a/b"}, AutoFixLabel: "custom-label"},
-			want: Config{Limit: 10, Repos: []string{"a/b"}, AutoFixLabel: "custom-label", WorkDir: os.TempDir()},
+			in:   Config{Limit: 10, AutoFixLabel: "custom-label"},
+			want: Config{Limit: 10, AutoFixLabel: "custom-label", WorkDir: os.TempDir()},
 		},
 		{
 			name: "work_dir preserved",
-			in:   Config{Limit: 10, Repos: []string{"a/b"}, WorkDir: "/var/tmp"},
-			want: Config{Limit: 10, Repos: []string{"a/b"}, AutoFixLabel: defaultAutoFixLabel, WorkDir: "/var/tmp"},
+			in:   Config{Limit: 10, WorkDir: "/var/tmp"},
+			want: Config{Limit: 10, AutoFixLabel: defaultAutoFixLabel, WorkDir: "/var/tmp"},
 		},
 		{
 			name: "auto_fix_ci flag preserved",
-			in:   Config{Limit: 10, Repos: []string{"a/b"}, AutoFixCI: true},
-			want: Config{Limit: 10, Repos: []string{"a/b"}, AutoFixCI: true, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
+			in:   Config{Limit: 10, AutoFixCI: true},
+			want: Config{Limit: 10, AutoFixCI: true, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
 		},
 	}
 
@@ -56,59 +55,47 @@ func TestApplyConfigDefaults(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.in
 			applyConfigDefaults(&got)
-			if !reflect.DeepEqual(got, tc.want) {
+			if got != tc.want {
 				t.Errorf("applyConfigDefaults() = %+v, want %+v", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestValidateConfig(t *testing.T) {
+func TestParseRepoArg(t *testing.T) {
 	cases := []struct {
 		name      string
-		cfg       Config
+		args      []string
+		want      string
 		wantErr   bool
-		errSubstr []string
+		errSubstr string
 	}{
-		{
-			name: "valid",
-			cfg:  Config{Repos: []string{"a/b", "c/d"}, SourcePath: "/p"},
-		},
-		{
-			name:      "empty repos",
-			cfg:       Config{Repos: nil, SourcePath: "/some/path.toml"},
-			wantErr:   true,
-			errSubstr: []string{"/some/path.toml", "repos is empty"},
-		},
-		{
-			name:      "repo without slash",
-			cfg:       Config{Repos: []string{"no-slash"}, SourcePath: "/p"},
-			wantErr:   true,
-			errSubstr: []string{"no-slash", "[0]", "owner/name"},
-		},
-		{
-			name:      "second repo without slash",
-			cfg:       Config{Repos: []string{"ok/repo", "bad"}, SourcePath: "/p"},
-			wantErr:   true,
-			errSubstr: []string{"bad", "[1]"},
-		},
+		{name: "valid", args: []string{"owner/name"}, want: "owner/name"},
+		{name: "missing", args: nil, wantErr: true, errSubstr: "missing target repository"},
+		{name: "empty slice", args: []string{}, wantErr: true, errSubstr: "missing target repository"},
+		{name: "no slash", args: []string{"no-slash"}, wantErr: true, errSubstr: "owner/name"},
+		{name: "leading slash", args: []string{"/leading"}, wantErr: true, errSubstr: "owner/name"},
+		{name: "trailing slash", args: []string{"trailing/"}, wantErr: true, errSubstr: "owner/name"},
+		{name: "too many", args: []string{"a/b", "c/d"}, wantErr: true, errSubstr: "only one repository"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateConfig(&tc.cfg)
+			got, err := parseRepoArg(tc.args)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
 				}
-				msg := err.Error()
-				for _, s := range tc.errSubstr {
-					if !strings.Contains(msg, s) {
-						t.Errorf("error %q missing substring %q", msg, s)
-					}
+				if !strings.Contains(err.Error(), tc.errSubstr) {
+					t.Errorf("error %q missing substring %q", err.Error(), tc.errSubstr)
 				}
-			} else if err != nil {
-				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -123,9 +110,6 @@ func TestLoadConfig(t *testing.T) {
 		}
 		if cfg.Limit != 10 {
 			t.Errorf("Limit = %d, want 10", cfg.Limit)
-		}
-		if !reflect.DeepEqual(cfg.Repos, []string{"owner/a", "owner/b"}) {
-			t.Errorf("Repos = %v, want [owner/a owner/b]", cfg.Repos)
 		}
 		if cfg.SourcePath != path {
 			t.Errorf("SourcePath = %q, want %q", cfg.SourcePath, path)
@@ -164,26 +148,6 @@ func TestLoadConfig(t *testing.T) {
 		}
 		if _, ok := errors.AsType[*configNotFoundError](err); ok {
 			t.Errorf("malformed should not be configNotFoundError, got %v", err)
-		}
-	})
-
-	t.Run("missing repos", func(t *testing.T) {
-		_, err := loadConfig(filepath.Join("testdata", "missing-repos.toml"))
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if !strings.Contains(err.Error(), "repos is empty") {
-			t.Errorf("error %q missing 'repos is empty'", err)
-		}
-	})
-
-	t.Run("bad repo format", func(t *testing.T) {
-		_, err := loadConfig(filepath.Join("testdata", "bad-repo.toml"))
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if !strings.Contains(err.Error(), "owner/name") {
-			t.Errorf("error %q missing 'owner/name'", err)
 		}
 	})
 

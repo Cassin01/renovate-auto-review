@@ -1,2 +1,1 @@
-repos = ["owner/a"]
 custom_prompt = "コメントは日本語を使って"

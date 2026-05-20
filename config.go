@@ -12,12 +12,11 @@ import (
 )
 
 type Config struct {
-	Limit        int      `toml:"limit"`
-	Repos        []string `toml:"repos"`
-	AutoFixCI    bool     `toml:"auto_fix_ci"`
-	AutoFixLabel string   `toml:"auto_fix_label"`
-	WorkDir      string   `toml:"work_dir"`
-	CustomPrompt string   `toml:"custom_prompt"`
+	Limit        int    `toml:"limit"`
+	AutoFixCI    bool   `toml:"auto_fix_ci"`
+	AutoFixLabel string `toml:"auto_fix_label"`
+	WorkDir      string `toml:"work_dir"`
+	CustomPrompt string `toml:"custom_prompt"`
 
 	SourcePath string `toml:"-"`
 }
@@ -53,9 +52,6 @@ func loadConfig(path string) (*Config, error) {
 	}
 	cfg.SourcePath = path
 	applyConfigDefaults(&cfg)
-	if err := validateConfig(&cfg); err != nil {
-		return nil, err
-	}
 	return &cfg, nil
 }
 
@@ -71,18 +67,6 @@ func applyConfigDefaults(cfg *Config) {
 	}
 }
 
-func validateConfig(cfg *Config) error {
-	if len(cfg.Repos) == 0 {
-		return fmt.Errorf("config %s: repos is empty", cfg.SourcePath)
-	}
-	for i, r := range cfg.Repos {
-		if !strings.Contains(r, "/") {
-			return fmt.Errorf("config %s: repos[%d] %q is not owner/name", cfg.SourcePath, i, r)
-		}
-	}
-	return nil
-}
-
 type configNotFoundError struct{ Path string }
 
 func (e *configNotFoundError) Error() string {
@@ -92,14 +76,12 @@ func (e *configNotFoundError) Error() string {
 const sampleConfig = `# renovate-auto-review config (TOML)
 # Location: $XDG_CONFIG_HOME/renovate-auto-review/config.toml
 #           (defaults to ~/.config/renovate-auto-review/config.toml)
+#
+# Target repository is specified on the command line, e.g.:
+#   renovate-auto-review Cassin01/multi_agent_control_tower
 
 # Value passed to "gh pr list --limit" (optional)
 limit = 50
-
-# Target GitHub repositories (owner/name)
-repos = [
-  "Cassin01/multi_agent_control_tower",
-]
 
 # Let Claude attempt to fix failing CI (default false).
 # When true, every Renovate PR in the repo is in scope. For per-PR opt-in,

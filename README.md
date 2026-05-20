@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/Cassin01/renovate-auto-review/actions/workflows/ci.yml/badge.svg)](https://github.com/Cassin01/renovate-auto-review/actions/workflows/ci.yml)
 
-A Go script that enumerates open Renovate PRs from the GitHub repositories
-listed in a config file, then launches `claude --permission-mode auto`
+A Go script that enumerates open Renovate PRs from a GitHub repository
+specified on the command line, then launches `claude --permission-mode auto`
 (Claude auto mode) per PR so that Claude itself decides whether the PR is
 safe to merge and posts a comment on GitHub.
 
@@ -29,17 +29,14 @@ precedence (`$XDG_CONFIG_HOME/renovate-auto-review/config.toml`).
 ### Example `config.toml`
 
 ```toml
-limit  = 50
-repos = [
-  "Cassin01/multi_agent_control_tower",
-  "owner/another-repo",
-]
+limit = 50
 ```
+
+The target repository is specified on the command line — see [Usage](#usage).
 
 | Key               | Type     | Default             | Description                                                                |
 |-------------------|----------|---------------------|----------------------------------------------------------------------------|
 | `limit`           | int      | `50`                | Maximum number of PRs fetched by `gh pr list`                              |
-| `repos`           | []string | (required)          | List of target repositories in `owner/name` form                           |
 | `auto_fix_ci`     | bool     | `false`             | When true, Claude attempts to auto-fix and push on CI failure              |
 | `auto_fix_label`  | string   | `"claude-auto-fix"` | Per-PR opt-in label. A PR with this label is treated as `auto_fix_ci`      |
 | `work_dir`        | string   | `os.TempDir()`      | Parent path for temporary work directories used during CI auto-fix         |
@@ -66,15 +63,17 @@ cannot be accidentally overridden.
 
 ## Usage
 
-```sh
-# List target PRs for every repo in the config without invoking claude
-go run . -dry-run
+The target repository is passed as a positional argument in `owner/name` form.
 
-# Real run: post comments on Renovate PRs across all repos (skipping ones that already have a Claude comment)
-go run .
+```sh
+# List target Renovate PRs without invoking claude
+go run . -dry-run Cassin01/multi_agent_control_tower
+
+# Real run: post comments on Renovate PRs (skipping ones that already have a Claude comment)
+go run . Cassin01/multi_agent_control_tower
 
 # Use a different config path
-go run . -config /path/to/other.toml
+go run . -config /path/to/other.toml Cassin01/multi_agent_control_tower
 ```
 
 ## Flags
@@ -84,8 +83,9 @@ go run . -config /path/to/other.toml
 | `-config`   | `$XDG_CONFIG_HOME/renovate-auto-review/config.toml` | Path to the config file    |
 | `-dry-run`  | `false`                                             | Only list target PRs       |
 
-> **BREAKING**: The previous `-repo` / `-marker` / `-limit` flags have been
-> removed; they are all now configured via `config.toml`.
+> **BREAKING**: The target repository is now passed as a positional CLI
+> argument (`<owner/name>`); the previous `repos` key in `config.toml` is no
+> longer supported.
 
 ## Renovate PR detection rules
 
@@ -146,6 +146,6 @@ CI auto-fix does not fire under `-dry-run` either.
 - Claude API usage costs scale with the number of PRs
 - In case the `--permission-mode auto` classifier soft-denies `gh pr comment`,
   it is explicitly allowed via `--allowedTools`
-- Parallel execution is not supported (repos and PRs are processed sequentially)
+- Parallel execution is not supported (PRs are processed sequentially)
 - The auto-fix flow cannot block `git push --force` family commands via the
   `allowedTools` prefix match, so it relies on the prompt's explicit prohibition

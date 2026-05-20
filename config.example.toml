@@ -1,14 +1,11 @@
 # renovate-auto-review config — copy to ~/.config/renovate-auto-review/config.toml and edit.
 # If XDG_CONFIG_HOME is set, $XDG_CONFIG_HOME/renovate-auto-review/config.toml takes precedence.
+#
+# Target repository is specified on the command line, e.g.:
+#   renovate-auto-review Cassin01/multi_agent_control_tower
 
 # Value passed to "gh pr list --limit" (optional)
 limit = 50
-
-# Target GitHub repositories (owner/name)
-repos = [
-  "Cassin01/multi_agent_control_tower",
-  # "owner/another-repo",
-]
 
 # Optional: appended to every Claude prompt as "[Additional instructions]".
 # Use to override output language, tone, or add project-specific constraints.

@@ -13,9 +13,21 @@ import (
 const defaultMarker = "<!-- claude-auto-mergeable-check -->"
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(),
+			"usage: %s [flags] <owner/name>\n\nflags:\n", os.Args[0])
+		flag.PrintDefaults()
+	}
 	cfgPath := flag.String("config", "", "path to config.toml (default: $XDG_CONFIG_HOME/renovate-auto-review/config.toml)")
 	dryRun := flag.Bool("dry-run", false, "list target Renovate PRs but do not invoke claude")
 	flag.Parse()
+
+	repo, err := parseRepoArg(flag.Args())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n\n", err)
+		flag.Usage()
+		os.Exit(2)
+	}
 
 	path := *cfgPath
 	if path == "" {
@@ -37,12 +49,28 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	if err := runAll(cfg, *dryRun); err != nil {
+	if err := runAll(cfg, []string{repo}, *dryRun); err != nil {
 		log.Fatalf("fatal: %v", err)
 	}
 }
 
-func runAll(cfg *Config, dryRun bool) error {
+func parseRepoArg(args []string) (string, error) {
+	switch len(args) {
+	case 0:
+		return "", errors.New("missing target repository (expected owner/name as the last argument)")
+	case 1:
+		// ok
+	default:
+		return "", fmt.Errorf("only one repository can be specified, got %d", len(args))
+	}
+	r := args[0]
+	if !strings.Contains(r, "/") || strings.HasPrefix(r, "/") || strings.HasSuffix(r, "/") {
+		return "", fmt.Errorf("repository %q is not in owner/name format", r)
+	}
+	return r, nil
+}
+
+func runAll(cfg *Config, repos []string, dryRun bool) error {
 	var claudeBin string
 	if !dryRun {
 		bin, err := exec.LookPath("claude")
@@ -56,10 +84,10 @@ func runAll(cfg *Config, dryRun bool) error {
 	}
 
 	fmt.Fprintf(os.Stdout, "config: %s\nrepos: %d, limit: %d\n",
-		cfg.SourcePath, len(cfg.Repos), cfg.Limit)
+		cfg.SourcePath, len(repos), cfg.Limit)
 
 	var totalProcessed, totalSkipped, totalFailed int
-	for _, repo := range cfg.Repos {
+	for _, repo := range repos {
 		fmt.Fprintf(os.Stdout, "\n###### %s ######\n", repo)
 		p, s, f := processRepo(claudeBin, repo, defaultMarker, cfg, dryRun)
 		totalProcessed += p
