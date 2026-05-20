@@ -96,20 +96,30 @@ A PR is considered a Renovate PR when both of the following are true:
 
 ## Duplicate-comment prevention
 
-A PR is skipped only when an existing comment body contains the built-in
-marker string (`<!-- claude-auto-mergeable-check -->`) **and no new commits
-have been pushed since that comment was posted**. PRs whose HEAD has moved
-(via rebase or extra commits) are automatically re-reviewed. Comments
-posted by Claude always include the marker (an HTML comment) at the top.
+A **review** is skipped only when an existing comment body contains the
+built-in marker string (`<!-- claude-auto-mergeable-check -->`) **and no
+new commits have been pushed since that comment was posted**. PRs whose
+HEAD has moved (via rebase or extra commits) are automatically
+re-reviewed. Comments posted by Claude always include the marker (an HTML
+comment) at the top.
+
+The marker gates only the review step. **Auto-fix is evaluated independently
+based on the live CI status** — see the next section for details.
 
 ## Auto-fix on CI failure (opt-in)
 
-After the review, if the PR's CI is failing and either of the following is
-true, Claude will attempt to check out the branch locally, fix it, and
-`git push`:
+Auto-fix runs whenever the PR's CI is failing and either of the following
+is true:
 
 - `auto_fix_ci = true` in `config.toml`
 - The PR has the `auto_fix_label` (default `claude-auto-fix`)
+
+It is evaluated **independently of the review-skip decision**. A PR whose
+review is being skipped (existing marker + no new commits) will still
+have auto-fix run if CI is currently failing. As a consequence, a PR
+where the previous auto-fix attempt did not resolve the failure will be
+re-tried on every run — bounded by the prompt's "give up after 3 attempts"
+rule and your cron interval.
 
 Behavior:
 
