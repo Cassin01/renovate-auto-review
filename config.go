@@ -21,13 +21,13 @@ type Config struct {
 
 func defaultConfigPath() (string, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "auto_approve", "config.toml"), nil
+		return filepath.Join(xdg, "renovate-auto-review", "config.toml"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "auto_approve", "config.toml"), nil
+	return filepath.Join(home, ".config", "renovate-auto-review", "config.toml"), nil
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -81,9 +81,9 @@ func (e *configNotFoundError) Error() string {
 	return fmt.Sprintf("config not found: %s", e.Path)
 }
 
-const sampleConfig = `# auto_approve config (TOML)
-# 配置先: $XDG_CONFIG_HOME/auto_approve/config.toml
-#         (デフォルトは ~/.config/auto_approve/config.toml)
+const sampleConfig = `# renovate-auto-review config (TOML)
+# 配置先: $XDG_CONFIG_HOME/renovate-auto-review/config.toml
+#         (デフォルトは ~/.config/renovate-auto-review/config.toml)
 
 # Claude 投稿コメントを重複検出するためのマーカー (省略可)
 marker = "<!-- claude-auto-mergeable-check -->"

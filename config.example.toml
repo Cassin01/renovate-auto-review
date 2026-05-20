@@ -1,5 +1,5 @@
-# auto_approve config — copy to ~/.config/auto_approve/config.toml and edit.
-# XDG_CONFIG_HOME が設定されていれば $XDG_CONFIG_HOME/auto_approve/config.toml が優先される。
+# renovate-auto-review config — copy to ~/.config/renovate-auto-review/config.toml and edit.
+# XDG_CONFIG_HOME が設定されていれば $XDG_CONFIG_HOME/renovate-auto-review/config.toml が優先される。
 
 # Claude 投稿コメントを重複検出するためのマーカー (省略可)
 marker = "<!-- claude-auto-mergeable-check -->"

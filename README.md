@@ -1,4 +1,4 @@
-# auto_approve
+# renovate-auto-review
 
 設定ファイルに列挙した GitHub リポジトリの Open Renovate PR を抽出し、各 PR
 ごとに `claude --permission-mode auto` (Claude auto mode) を起動して、PR が
@@ -15,13 +15,13 @@
 設定ファイルを XDG 規約に従ったパスに配置する。
 
 ```sh
-mkdir -p ~/.config/auto_approve
-cp config.example.toml ~/.config/auto_approve/config.toml
-$EDITOR ~/.config/auto_approve/config.toml
+mkdir -p ~/.config/renovate-auto-review
+cp config.example.toml ~/.config/renovate-auto-review/config.toml
+$EDITOR ~/.config/renovate-auto-review/config.toml
 ```
 
 `XDG_CONFIG_HOME` 環境変数が設定されていればそちらが優先される
-(`$XDG_CONFIG_HOME/auto_approve/config.toml`)。
+(`$XDG_CONFIG_HOME/renovate-auto-review/config.toml`)。
 
 ### config.toml の例
 
@@ -59,7 +59,7 @@ go run . -config /path/to/other.toml
 
 | フラグ      | 既定値                                              | 説明                       |
 |-------------|----------------------------------------------------|----------------------------|
-| `-config`   | `$XDG_CONFIG_HOME/auto_approve/config.toml`        | 設定ファイルのパス         |
+| `-config`   | `$XDG_CONFIG_HOME/renovate-auto-review/config.toml`| 設定ファイルのパス         |
 | `-dry-run`  | `false`                                            | 対象 PR の一覧表示のみ     |
 
 > **BREAKING**: 以前あった `-repo` / `-marker` / `-limit` フラグは廃止し、

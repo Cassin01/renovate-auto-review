@@ -12,7 +12,7 @@ import (
 const defaultMarker = "<!-- claude-auto-mergeable-check -->"
 
 func main() {
-	cfgPath := flag.String("config", "", "path to config.toml (default: $XDG_CONFIG_HOME/auto_approve/config.toml)")
+	cfgPath := flag.String("config", "", "path to config.toml (default: $XDG_CONFIG_HOME/renovate-auto-review/config.toml)")
 	dryRun := flag.Bool("dry-run", false, "list target Renovate PRs but do not invoke claude")
 	flag.Parse()
 
