@@ -28,7 +28,7 @@ You are an experienced reviewer. Follow the steps below to analyze the PR and po
 5. Post the generated comment via ` + "`gh pr comment %d --repo %s --body \"<comment body>\"`" + `
    - For multi-line bodies, you may use ` + "`--body-file -`" + ` with a heredoc
 
-Important:
+%sImportant:
 - The first line of the comment body MUST contain %s (duplicate-detection marker)
 - The footer block (starting with ` + "`---`" + `) MUST be included verbatim at the end of the comment body
 - When uncertain, choose ⚠️ needs review; avoid asserting "safe" without confidence
@@ -36,7 +36,7 @@ Important:
 - No other explanatory output is needed
 `
 
-func buildPrompt(repo string, prNumber int, marker string) string {
+func buildPrompt(repo string, prNumber int, marker, customPrompt string) string {
 	return fmt.Sprintf(promptTemplate,
 		repo, prNumber,
 		prNumber, repo,
@@ -44,8 +44,16 @@ func buildPrompt(repo string, prNumber int, marker string) string {
 		prNumber, repo,
 		marker,
 		prNumber, repo,
+		additionalInstructionsBlock(customPrompt),
 		marker,
 	)
+}
+
+func additionalInstructionsBlock(s string) string {
+	if s == "" {
+		return ""
+	}
+	return "[Additional instructions]\n" + s + "\n\n"
 }
 
 type claudeResult struct {
@@ -53,8 +61,8 @@ type claudeResult struct {
 	Posted bool
 }
 
-func runClaudeAutoMode(claudeBin, repo string, prNumber int, marker string) (*claudeResult, error) {
-	prompt := buildPrompt(repo, prNumber, marker)
+func runClaudeAutoMode(claudeBin, repo string, prNumber int, marker, customPrompt string) (*claudeResult, error) {
+	prompt := buildPrompt(repo, prNumber, marker, customPrompt)
 	cmd := exec.Command(
 		claudeBin,
 		"--permission-mode", "auto",
@@ -112,14 +120,14 @@ If any of the following applies, **do not push** — post a ❌ unfixable commen
 - The fix requires API keys, secrets, or external network access
 - Build or test still fails after 3 attempts
 
-[Output protocol]
+%s[Output protocol]
 - On successful push + comment post: print ` + "`PUSHED`" + ` on the final line
 - On comment-only post (unfixable fallback) success: print ` + "`POSTED`" + ` on the final line
 - The footer block (starting with ` + "`---`" + `) MUST be included verbatim at the end of the comment body
 - No other explanatory output is needed
 `
 
-func buildFixPrompt(repo string, prNumber int, headRef, marker, workDir, logsExcerpt string) string {
+func buildFixPrompt(repo string, prNumber int, headRef, marker, workDir, logsExcerpt, customPrompt string) string {
 	return fmt.Sprintf(fixPromptTemplate,
 		repo, prNumber, headRef,
 		workDir,
@@ -128,6 +136,7 @@ func buildFixPrompt(repo string, prNumber int, headRef, marker, workDir, logsExc
 		headRef,
 		prNumber, repo,
 		marker,
+		additionalInstructionsBlock(customPrompt),
 	)
 }
 
@@ -141,8 +150,8 @@ const fixAllowedTools = "Bash(gh pr view:*) Bash(gh pr diff:*) Bash(gh pr checks
 	"Bash(ls:*) Bash(cat:*) Bash(rg:*) Bash(fd:*) " +
 	"Read Write Edit Glob Grep"
 
-func runClaudeFixMode(claudeBin, repo string, prNumber int, headRef, marker, workDir, logs string) (*claudeResult, error) {
-	prompt := buildFixPrompt(repo, prNumber, headRef, marker, workDir, logs)
+func runClaudeFixMode(claudeBin, repo string, prNumber int, headRef, marker, workDir, logs, customPrompt string) (*claudeResult, error) {
+	prompt := buildFixPrompt(repo, prNumber, headRef, marker, workDir, logs, customPrompt)
 	cmd := exec.Command(
 		claudeBin,
 		"--permission-mode", "auto",

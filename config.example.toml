@@ -9,3 +9,7 @@ repos = [
   "Cassin01/multi_agent_control_tower",
   # "owner/another-repo",
 ]
+
+# Optional: appended to every Claude prompt as "[Additional instructions]".
+# Use to override output language, tone, or add project-specific constraints.
+# custom_prompt = "Write the PR comment body in Japanese."

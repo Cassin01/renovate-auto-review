@@ -187,6 +187,16 @@ func TestLoadConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("custom_prompt loaded", func(t *testing.T) {
+		cfg, err := loadConfig(filepath.Join("testdata", "custom-prompt.toml"))
+		if err != nil {
+			t.Fatalf("loadConfig: %v", err)
+		}
+		if cfg.CustomPrompt != "コメントは日本語を使って" {
+			t.Errorf("CustomPrompt = %q, want %q", cfg.CustomPrompt, "コメントは日本語を使って")
+		}
+	})
+
 	t.Run("unknown keys load successfully", func(t *testing.T) {
 		cfg, err := loadConfig(filepath.Join("testdata", "unknown-keys.toml"))
 		if err != nil {

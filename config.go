@@ -17,6 +17,7 @@ type Config struct {
 	AutoFixCI    bool     `toml:"auto_fix_ci"`
 	AutoFixLabel string   `toml:"auto_fix_label"`
 	WorkDir      string   `toml:"work_dir"`
+	CustomPrompt string   `toml:"custom_prompt"`
 
 	SourcePath string `toml:"-"`
 }
@@ -110,4 +111,9 @@ auto_fix_ci = false
 
 # Parent directory used for temporary work dirs during CI auto-fix (default os.TempDir())
 # work_dir = "/tmp"
+
+# Optional: extra instruction appended to every Claude prompt as an
+# "[Additional instructions]" section. Useful for overriding output language,
+# tone, or adding project-specific constraints. Leave empty to disable.
+# custom_prompt = "Write the PR comment body in Japanese."
 `

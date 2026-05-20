@@ -43,8 +43,26 @@ repos = [
 | `auto_fix_ci`     | bool     | `false`             | When true, Claude attempts to auto-fix and push on CI failure              |
 | `auto_fix_label`  | string   | `"claude-auto-fix"` | Per-PR opt-in label. A PR with this label is treated as `auto_fix_ci`      |
 | `work_dir`        | string   | `os.TempDir()`      | Parent path for temporary work directories used during CI auto-fix         |
+| `custom_prompt`   | string   | `""`                | Extra instruction appended to every Claude prompt (see below)              |
 
 Unknown keys produce a warning on stderr (typo detection).
+
+### `custom_prompt`
+
+When set, the value is injected near the end of both the review and the
+auto-fix prompts inside an `[Additional instructions]` section. Because it
+appears after the built-in directives, it is well-suited to overriding
+defaults (output language, tone, etc.) and adding project-specific
+constraints. Leave it empty (or omit it) to keep the original prompts
+unchanged.
+
+```toml
+custom_prompt = "Write the PR comment body in Japanese."
+```
+
+The output protocol (`POSTED` / `PUSHED` marker and the duplicate-detection
+HTML marker in the comment body) is enforced after this section, so it
+cannot be accidentally overridden.
 
 ## Usage
 

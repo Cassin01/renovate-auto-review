@@ -114,7 +114,7 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool) (proc
 			continue
 		}
 
-		res, err := runClaudeAutoMode(claudeBin, repo, pr.Number, marker)
+		res, err := runClaudeAutoMode(claudeBin, repo, pr.Number, marker, cfg.CustomPrompt)
 		if res != nil && res.Stdout != "" {
 			fmt.Fprintln(os.Stdout, "--- claude output ---")
 			fmt.Fprintln(os.Stdout, res.Stdout)
@@ -169,7 +169,7 @@ func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR) error {
 	defer func() { _ = os.RemoveAll(workDir) }()
 	fmt.Fprintf(os.Stdout, "auto-fix: workDir=%s, failing checks=%d\n", workDir, len(runIDs))
 
-	res, err := runClaudeFixMode(claudeBin, repo, pr.Number, pr.HeadRefName, marker, workDir, logs.String())
+	res, err := runClaudeFixMode(claudeBin, repo, pr.Number, pr.HeadRefName, marker, workDir, logs.String(), cfg.CustomPrompt)
 	if res != nil && res.Stdout != "" {
 		fmt.Fprintln(os.Stdout, "--- claude fix output ---")
 		fmt.Fprintln(os.Stdout, res.Stdout)

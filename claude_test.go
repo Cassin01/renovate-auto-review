@@ -21,7 +21,7 @@ func TestBuildPrompt(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildPrompt(tc.repo, tc.prNumber, tc.marker)
+			got := buildPrompt(tc.repo, tc.prNumber, tc.marker, "")
 
 			if c := strings.Count(got, tc.repo); c < 4 {
 				t.Errorf("repo %q should appear at least 4 times, got %d", tc.repo, c)
@@ -48,6 +48,39 @@ func TestBuildPrompt(t *testing.T) {
 			for _, bad := range []string{"%!s(MISSING)", "%!d(MISSING)", "%!(EXTRA"} {
 				if strings.Contains(got, bad) {
 					t.Errorf("unexpected format error marker %q present", bad)
+				}
+			}
+
+			if strings.Contains(got, "[Additional instructions]") {
+				t.Errorf("empty customPrompt should not emit [Additional instructions] section")
+			}
+		})
+	}
+}
+
+func TestBuildPromptWithCustomPrompt(t *testing.T) {
+	cases := []struct {
+		name   string
+		custom string
+	}{
+		{"japanese", "コメントは日本語を使って"},
+		{"multiline", "rule one\nrule two\nrule three"},
+		{"ascii", "be terse"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildPrompt("owner/repo", 7, "<!-- m -->", tc.custom)
+
+			if c := strings.Count(got, "[Additional instructions]"); c != 1 {
+				t.Errorf("section header should appear once, got %d", c)
+			}
+			if !strings.Contains(got, tc.custom) {
+				t.Errorf("custom prompt %q not embedded verbatim", tc.custom)
+			}
+			for _, want := range []string{"Important:", "POSTED", "Claude auto review"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("invariant substring %q missing", want)
 				}
 			}
 		})
@@ -83,7 +116,7 @@ func TestBuildFixPrompt(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildFixPrompt(tc.repo, tc.prNumber, tc.headRef, tc.marker, tc.workDir, tc.logs)
+			got := buildFixPrompt(tc.repo, tc.prNumber, tc.headRef, tc.marker, tc.workDir, tc.logs, "")
 
 			for _, want := range []string{
 				tc.repo, tc.headRef, tc.marker, tc.workDir,
@@ -109,6 +142,38 @@ func TestBuildFixPrompt(t *testing.T) {
 			for _, bad := range []string{"%!s(MISSING)", "%!d(MISSING)", "%!(EXTRA"} {
 				if strings.Contains(got, bad) {
 					t.Errorf("unexpected format error marker %q present", bad)
+				}
+			}
+
+			if strings.Contains(got, "[Additional instructions]") {
+				t.Errorf("empty customPrompt should not emit [Additional instructions] section")
+			}
+		})
+	}
+}
+
+func TestBuildFixPromptWithCustomPrompt(t *testing.T) {
+	cases := []struct {
+		name   string
+		custom string
+	}{
+		{"japanese", "コメントは日本語を使って"},
+		{"multiline", "do X\ndo Y"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildFixPrompt("owner/repo", 1, "renovate/x", "<!-- m -->", "/tmp/w", "log excerpt", tc.custom)
+
+			if c := strings.Count(got, "[Additional instructions]"); c != 1 {
+				t.Errorf("section header should appear once, got %d", c)
+			}
+			if !strings.Contains(got, tc.custom) {
+				t.Errorf("custom prompt %q not embedded verbatim", tc.custom)
+			}
+			for _, want := range []string{"[Output protocol]", "PUSHED", "POSTED", "Hard rules"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("invariant substring %q missing", want)
 				}
 			}
 		})
