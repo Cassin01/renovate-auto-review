@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+const commentFooter = "\n---\n👷 Generated with [renovate-auto-review](https://github.com/Cassin01/renovate-auto-review)\n"
+
 const promptTemplate = `Target: %s PR #%d (Renovate auto-update)
 
 You are an experienced reviewer. Follow the steps below to analyze the PR and post a comment to GitHub at the end.
@@ -22,12 +24,13 @@ You are an experienced reviewer. Follow the steps below to analyze the PR and po
 - **Reason**: (2-4 lines of rationale)
 - **CI status**: (list PASS/FAIL/PENDING)
 - **Notes**: (only if any; otherwise write "none")
-
+` + commentFooter + `
 5. Post the generated comment via ` + "`gh pr comment %d --repo %s --body \"<comment body>\"`" + `
    - For multi-line bodies, you may use ` + "`--body-file -`" + ` with a heredoc
 
 Important:
 - The first line of the comment body MUST contain %s (duplicate-detection marker)
+- The footer block (starting with ` + "`---`" + `) MUST be included verbatim at the end of the comment body
 - When uncertain, choose ⚠️ needs review; avoid asserting "safe" without confidence
 - After a successful post, print only POSTED on the final output line
 - No other explanatory output is needed
@@ -101,7 +104,7 @@ const fixPromptTemplate = `Target: %s PR #%d (Renovate auto-update). Make a mini
 - Failing checks: <list names>
 - Suspected cause: (2-3 lines)
 - Fix details: (2-3 lines; only when pushed. If not pushed, write "none")
-
+` + commentFooter + `
 [Fallback]
 If any of the following applies, **do not push** — post a ❌ unfixable comment only and exit:
 - A major breaking change is required (e.g. an API-incompatible library upgrade)
@@ -112,6 +115,7 @@ If any of the following applies, **do not push** — post a ❌ unfixable commen
 [Output protocol]
 - On successful push + comment post: print ` + "`PUSHED`" + ` on the final line
 - On comment-only post (unfixable fallback) success: print ` + "`POSTED`" + ` on the final line
+- The footer block (starting with ` + "`---`" + `) MUST be included verbatim at the end of the comment body
 - No other explanatory output is needed
 `
 

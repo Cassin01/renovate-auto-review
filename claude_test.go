@@ -38,6 +38,7 @@ func TestBuildPrompt(t *testing.T) {
 				"experienced reviewer",
 				"POSTED",
 				"Claude auto review",
+				"github.com/Cassin01/renovate-auto-review",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("expected substring %q not found", want)
@@ -94,6 +95,7 @@ func TestBuildFixPrompt(t *testing.T) {
 				"Fallback",
 				"PUSHED",
 				"POSTED",
+				"github.com/Cassin01/renovate-auto-review",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("expected substring %q not found", want)
