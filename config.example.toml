@@ -1,10 +1,10 @@
 # renovate-auto-review config — copy to ~/.config/renovate-auto-review/config.toml and edit.
-# XDG_CONFIG_HOME が設定されていれば $XDG_CONFIG_HOME/renovate-auto-review/config.toml が優先される。
+# If XDG_CONFIG_HOME is set, $XDG_CONFIG_HOME/renovate-auto-review/config.toml takes precedence.
 
-# gh pr list --limit に渡す値 (省略可)
+# Value passed to "gh pr list --limit" (optional)
 limit = 50
 
-# 対象 GitHub リポジトリ (owner/name)
+# Target GitHub repositories (owner/name)
 repos = [
   "Cassin01/multi_agent_control_tower",
   # "owner/another-repo",

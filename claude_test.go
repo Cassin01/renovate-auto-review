@@ -35,9 +35,9 @@ func TestBuildPrompt(t *testing.T) {
 			}
 
 			for _, want := range []string{
-				"あなたは熟練のレビュアーです",
+				"experienced reviewer",
 				"POSTED",
-				"Claude 自動レビュー",
+				"Claude auto review",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("expected substring %q not found", want)
@@ -87,11 +87,11 @@ func TestBuildFixPrompt(t *testing.T) {
 			for _, want := range []string{
 				tc.repo, tc.headRef, tc.marker, tc.workDir,
 				strconv.Itoa(tc.prNumber),
-				"絶対遵守",
+				"Hard rules",
 				"amend",
 				"force",
 				"rebase checkbox",
-				"フォールバック",
+				"Fallback",
 				"PUSHED",
 				"POSTED",
 			} {

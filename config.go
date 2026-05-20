@@ -89,25 +89,25 @@ func (e *configNotFoundError) Error() string {
 }
 
 const sampleConfig = `# renovate-auto-review config (TOML)
-# 配置先: $XDG_CONFIG_HOME/renovate-auto-review/config.toml
-#         (デフォルトは ~/.config/renovate-auto-review/config.toml)
+# Location: $XDG_CONFIG_HOME/renovate-auto-review/config.toml
+#           (defaults to ~/.config/renovate-auto-review/config.toml)
 
-# gh pr list --limit に渡す値 (省略可)
+# Value passed to "gh pr list --limit" (optional)
 limit = 50
 
-# 対象 GitHub リポジトリ (owner/name)
+# Target GitHub repositories (owner/name)
 repos = [
   "Cassin01/multi_agent_control_tower",
 ]
 
-# CI 失敗時に Claude に修正を試みさせる (default false)
-# true にすると repo 内全 Renovate PR が対象。PR 単位の opt-in を使う場合は false のまま
-# auto_fix_label を PR に付与する。
+# Let Claude attempt to fix failing CI (default false).
+# When true, every Renovate PR in the repo is in scope. For per-PR opt-in,
+# leave this false and attach auto_fix_label to the PR instead.
 auto_fix_ci = false
 
-# CI 自動修正の opt-in ラベル名 (default "claude-auto-fix")
+# Label name used for per-PR opt-in (default "claude-auto-fix")
 # auto_fix_label = "claude-auto-fix"
 
-# CI 自動修正時の作業ディレクトリ親パス (default os.TempDir())
+# Parent directory used for temporary work dirs during CI auto-fix (default os.TempDir())
 # work_dir = "/tmp"
 `

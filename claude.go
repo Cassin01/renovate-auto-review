@@ -7,30 +7,30 @@ import (
 	"strings"
 )
 
-const promptTemplate = `対象: %s の PR #%d (Renovate 自動更新)
+const promptTemplate = `Target: %s PR #%d (Renovate auto-update)
 
-あなたは熟練のレビュアーです。次の手順で PR を分析し、最後に GitHub にコメントを投稿してください。
+You are an experienced reviewer. Follow the steps below to analyze the PR and post a comment to GitHub at the end.
 
-1. ` + "`gh pr view %d --repo %s`" + ` で PR の概要・状態を取得する
-2. ` + "`gh pr diff %d --repo %s`" + ` で差分を確認する
-3. ` + "`gh pr checks %d --repo %s`" + ` で CI 結果を確認する
-4. 上記から「マージしても安全か」を判断し、以下のテンプレートで日本語コメントを生成する:
+1. Run ` + "`gh pr view %d --repo %s`" + ` to get the PR overview and status
+2. Run ` + "`gh pr diff %d --repo %s`" + ` to review the diff
+3. Run ` + "`gh pr checks %d --repo %s`" + ` to check CI results
+4. Decide whether the PR is safe to merge based on the above, and generate an English comment using the following template:
 
 %s
-## Claude 自動レビュー
-- **マージ可否判定**: (✅安全 / ⚠️要確認 / ❌マージ非推奨 のいずれか)
-- **理由**: (2〜4 行で根拠)
-- **CI 状態**: (PASS/FAIL/PENDING を列挙)
-- **注意点**: (ある場合のみ。なければ「特になし」)
+## Claude auto review
+- **Merge verdict**: (one of: ✅ safe / ⚠️ needs review / ❌ do not merge)
+- **Reason**: (2-4 lines of rationale)
+- **CI status**: (list PASS/FAIL/PENDING)
+- **Notes**: (only if any; otherwise write "none")
 
-5. 生成したコメントを ` + "`gh pr comment %d --repo %s --body \"<コメント本文>\"`" + ` で投稿する
-   - 改行を含む場合は ` + "`--body-file -`" + ` を使い、ヒアドキュメントで流し込む方式でもよい
+5. Post the generated comment via ` + "`gh pr comment %d --repo %s --body \"<comment body>\"`" + `
+   - For multi-line bodies, you may use ` + "`--body-file -`" + ` with a heredoc
 
-重要事項:
-- コメント本文の最初の行に必ず %s を含めること(重複検出マーカー)
-- 不確実な場合は ⚠️要確認 を選び、断定的な「安全」判定は避ける
-- 投稿成功後、最後の出力行に POSTED とだけ表示する
-- それ以外の余計な解説出力は不要
+Important:
+- The first line of the comment body MUST contain %s (duplicate-detection marker)
+- When uncertain, choose ⚠️ needs review; avoid asserting "safe" without confidence
+- After a successful post, print only POSTED on the final output line
+- No other explanatory output is needed
 `
 
 func buildPrompt(repo string, prNumber int, marker string) string {
@@ -75,44 +75,44 @@ func runClaudeAutoMode(claudeBin, repo string, prNumber int, marker string) (*cl
 	return res, nil
 }
 
-const fixPromptTemplate = `対象: %s の PR #%d (Renovate 自動更新)。CI 失敗をローカルで最小修正し、PR ブランチ ` + "`%s`" + ` に直接 push してください。
+const fixPromptTemplate = `Target: %s PR #%d (Renovate auto-update). Make a minimal local fix for the failing CI and push directly to the PR branch ` + "`%s`" + `.
 
-【絶対遵守 — 違反した場合は即終了】
-- 作業ディレクトリは ` + "`%s`" + ` 固定。` + "`cd`" + ` でこの外に出ない
-- ` + "`git commit --amend`" + ` / ` + "`git rebase`" + ` / ` + "`git reset --hard`" + ` / ` + "`git push --force`" + ` / ` + "`--force-with-lease`" + ` を使わない
-- ` + "`gh pr edit`" + ` を使わない (PR 本文の rebase checkbox に絶対に触れない)
-- 既存 Renovate コミットは保持し、新規コミットを 1 つだけ上に積む
-- 依存のメジャー破壊変更まで踏み込まない (軽微な型修正・テスト調整・lock 再生成のみ)
+[Hard rules — violating any aborts the task]
+- Working directory is fixed to ` + "`%s`" + `. Do not ` + "`cd`" + ` outside it
+- Do not use ` + "`git commit --amend`" + ` / ` + "`git rebase`" + ` / ` + "`git reset --hard`" + ` / ` + "`git push --force`" + ` / ` + "`--force-with-lease`" + `
+- Do not use ` + "`gh pr edit`" + ` (never touch the rebase checkbox in the PR body)
+- Keep existing Renovate commits intact; add exactly one new commit on top
+- Do not attempt major breaking changes to dependencies (only minor type fixes, test adjustments, lockfile regeneration)
 
-【手順】
-1. ` + "`gh pr checkout %d --repo %s`" + ` でブランチを checkout
-2. 以下の失敗ログ抜粋を読み、原因を特定:
+[Steps]
+1. ` + "`gh pr checkout %d --repo %s`" + ` to check out the branch
+2. Read the failure log excerpt below and identify the root cause:
 ---
 %s
 ---
-3. ソースを最小修正し、ローカルで build/test (` + "`go build ./...`" + ` / ` + "`go test ./...`" + ` 等) して通ることを確認
-4. ` + "`git add`" + ` → ` + "`git commit -m \"fix(ci): <概要> [claude-auto-fix]\"`" + `
-5. ` + "`git push origin HEAD:%s`" + ` (force 系オプションなし)
-6. ` + "`gh pr comment %d --repo %s --body-file -`" + ` で以下のテンプレを投稿:
+3. Apply a minimal source fix and verify locally with build/test (e.g. ` + "`go build ./...`" + ` / ` + "`go test ./...`" + `)
+4. ` + "`git add`" + ` -> ` + "`git commit -m \"fix(ci): <summary> [claude-auto-fix]\"`" + `
+5. ` + "`git push origin HEAD:%s`" + ` (no force-style options)
+6. Post the following template via ` + "`gh pr comment %d --repo %s --body-file -`" + `:
 
 %s
-## Claude 自動修正
-- 判定: ✅修正 push 済 / ⚠️部分修正 / ❌修正不能 のいずれか
-- 失敗 Check: <name 列挙>
-- 推定原因: (2-3 行)
-- 修正内容: (2-3 行。push した場合のみ。push しなかった場合は「なし」)
+## Claude auto-fix
+- Verdict: one of ✅ fix pushed / ⚠️ partial fix / ❌ unfixable
+- Failing checks: <list names>
+- Suspected cause: (2-3 lines)
+- Fix details: (2-3 lines; only when pushed. If not pushed, write "none")
 
-【フォールバック】
-以下のいずれかに該当する場合は **絶対に push せず**、❌修正不能 でコメントだけ投稿して終了:
-- メジャー版破壊変更が必要 (例: API 互換性が無い library upgrade)
-- lock file 再生成だけではテストが通らない複合変更
-- 修正に API キー / シークレット / 外部接続が必要
-- build または test を 3 回試行しても通らない
+[Fallback]
+If any of the following applies, **do not push** — post a ❌ unfixable comment only and exit:
+- A major breaking change is required (e.g. an API-incompatible library upgrade)
+- A compound change that lockfile regeneration alone cannot make tests pass
+- The fix requires API keys, secrets, or external network access
+- Build or test still fails after 3 attempts
 
-【出力規約】
-- push して comment 投稿成功時: 最終行に ` + "`PUSHED`" + ` を出力
-- comment 投稿のみ (修正不能フォールバック) 成功時: 最終行に ` + "`POSTED`" + ` を出力
-- 余計な解説出力は不要
+[Output protocol]
+- On successful push + comment post: print ` + "`PUSHED`" + ` on the final line
+- On comment-only post (unfixable fallback) success: print ` + "`POSTED`" + ` on the final line
+- No other explanatory output is needed
 `
 
 func buildFixPrompt(repo string, prNumber int, headRef, marker, workDir, logsExcerpt string) string {

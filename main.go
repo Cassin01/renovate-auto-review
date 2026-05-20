@@ -67,7 +67,7 @@ func runAll(cfg *Config, dryRun bool) error {
 		totalFailed += f
 	}
 
-	fmt.Fprintf(os.Stdout, "\n=== TOTAL: 処理=%d 件 / スキップ=%d 件 / エラー=%d 件 ===\n",
+	fmt.Fprintf(os.Stdout, "\n=== TOTAL: processed=%d / skipped=%d / errors=%d ===\n",
 		totalProcessed, totalSkipped, totalFailed)
 	if totalFailed > 0 {
 		os.Exit(1)
