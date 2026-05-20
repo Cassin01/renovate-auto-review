@@ -153,7 +153,7 @@ CI auto-fix does not fire under `-dry-run` either.
 
 ## Known limitations
 
-- Claude API usage costs scale with the number of PRs
+- Claude CLI usage costs scale with the number of PRs
 - In case the `--permission-mode auto` classifier soft-denies `gh pr comment`,
   it is explicitly allowed via `--allowedTools`
 - Parallel execution is not supported (PRs are processed sequentially)
