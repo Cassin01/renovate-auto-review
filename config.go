@@ -12,11 +12,11 @@ import (
 )
 
 type Config struct {
-	Limit         int      `toml:"limit"`
-	Repos         []string `toml:"repos"`
-	AutoFixCI     bool     `toml:"auto_fix_ci"`
-	AutoFixLabel  string   `toml:"auto_fix_label"`
-	WorkDir       string   `toml:"work_dir"`
+	Limit        int      `toml:"limit"`
+	Repos        []string `toml:"repos"`
+	AutoFixCI    bool     `toml:"auto_fix_ci"`
+	AutoFixLabel string   `toml:"auto_fix_label"`
+	WorkDir      string   `toml:"work_dir"`
 
 	SourcePath string `toml:"-"`
 }
