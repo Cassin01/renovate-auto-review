@@ -166,7 +166,7 @@ func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR) error {
 	if err != nil {
 		return fmt.Errorf("mkdir workdir: %w", err)
 	}
-	defer os.RemoveAll(workDir)
+	defer func() { _ = os.RemoveAll(workDir) }()
 	fmt.Fprintf(os.Stdout, "auto-fix: workDir=%s, failing checks=%d\n", workDir, len(runIDs))
 
 	res, err := runClaudeFixMode(claudeBin, repo, pr.Number, pr.HeadRefName, marker, workDir, logs.String())
