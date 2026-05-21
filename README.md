@@ -3,19 +3,19 @@
 [![CI](https://github.com/Cassin01/renovate-auto-review/actions/workflows/ci.yml/badge.svg)](https://github.com/Cassin01/renovate-auto-review/actions/workflows/ci.yml)
 
 A Go script that enumerates open Renovate PRs from a GitHub repository
-specified on the command line, then launches `claude --permission-mode auto`
-(Claude auto mode) per PR so that Claude itself decides whether the PR is
-safe to merge and posts a comment on GitHub.
+specified on the command line. For each PR, it launches
+`claude --permission-mode auto` (Claude auto mode) so that Claude decides
+whether the PR is safe to merge and then posts a comment on GitHub.
 
 ## Prerequisites
 
-- `gh` v2.x installed, with the `repo` scope on `gh auth status`
+- `gh` v2.x installed, with the `repo` scope (verify via `gh auth status`)
 - `claude` CLI installed (`which claude`)
-- Push permission or higher on the target repositories (required to post comments)
+- Push permission or higher on the target repository (required to post comments)
 
 ## Setup
 
-Place the config file at the XDG-conventional path.
+Place the config file at the standard XDG path.
 
 ```sh
 mkdir -p ~/.config/renovate-auto-review
@@ -38,11 +38,11 @@ The target repository is specified on the command line — see [Usage](#usage).
 |-------------------|----------|---------------------|----------------------------------------------------------------------------|
 | `limit`           | int      | `50`                | Maximum number of PRs fetched by `gh pr list`                              |
 | `auto_fix_ci`     | bool     | `false`             | When true, Claude attempts to auto-fix and push on CI failure              |
-| `auto_fix_label`  | string   | `"claude-auto-fix"` | Per-PR opt-in label. A PR with this label is treated as `auto_fix_ci`      |
-| `work_dir`        | string   | `os.TempDir()`      | Parent path for temporary work directories used during CI auto-fix         |
-| `custom_prompt`   | string   | `""`                | Extra instruction appended to every Claude prompt (see below)              |
+| `auto_fix_label`  | string   | `"claude-auto-fix"` | Per-PR opt-in label. A PR with this label is treated as if `auto_fix_ci = true` |
+| `work_dir`        | string   | `os.TempDir()`      | Parent directory for temporary work dirs used during CI auto-fix           |
+| `custom_prompt`   | string   | `""`                | Extra instructions appended to every Claude prompt (see below)             |
 
-Unknown keys produce a warning on stderr (typo detection).
+Unknown keys produce a warning on stderr (helps catch typos).
 
 ### `custom_prompt`
 
@@ -50,26 +50,27 @@ When set, the value is injected near the end of both the review and the
 auto-fix prompts inside an `[Additional instructions]` section. Because it
 appears after the built-in directives, it is well-suited to overriding
 defaults (output language, tone, etc.) and adding project-specific
-constraints. Leave it empty (or omit it) to keep the original prompts
+constraints. Leave it empty or omit the key to keep the original prompts
 unchanged.
 
 ```toml
 custom_prompt = "Write the PR comment body in Japanese."
 ```
 
-The output protocol (`POSTED` / `PUSHED` marker and the duplicate-detection
-HTML marker in the comment body) is enforced after this section, so it
+The output protocol (the `POSTED` / `PUSHED` marker on the final line, the
+duplicate-detection HTML marker, and the `👷 Generated with renovate-auto-review`
+footer at the end of the comment body) is enforced after this section, so it
 cannot be accidentally overridden.
 
 ## Usage
 
-The target repository is passed as a positional argument in `owner/name` form.
+The target repository is passed as a positional argument in the form `owner/name`.
 
 ```sh
-# List target Renovate PRs without invoking claude
+# List target Renovate PRs without invoking Claude
 go run . -dry-run Cassin01/multi_agent_control_tower
 
-# Real run: post comments on Renovate PRs (skipping ones that already have a Claude comment)
+# Real run: post comments on Renovate PRs (skipping those that already have a Claude comment)
 go run . Cassin01/multi_agent_control_tower
 
 # Use a different config path
@@ -94,68 +95,98 @@ A PR is considered a Renovate PR when both of the following are true:
 1. `author.is_bot == true` and `author.login == "app/renovate"`
 2. The PR labels include `renovate`
 
-## Duplicate-comment prevention
+## Review skip rules
 
-A **review** is skipped only when an existing comment body contains the
-built-in marker string (`<!-- claude-auto-mergeable-check -->`) **and no
-new commits have been pushed since that comment was posted**. PRs whose
-HEAD has moved (via rebase or extra commits) are automatically
-re-reviewed. Comments posted by Claude always include the marker (an HTML
-comment) at the top.
+The review step is skipped in either of the following cases (checked in order):
 
-The marker gates only the review step. **Auto-fix is evaluated independently
-based on the live CI status** — see the next section for details.
+1. **CI is failing.** When at least one completed check on the PR has
+   concluded as `FAILURE` / `CANCELLED` / `TIMED_OUT` / `ACTION_REQUIRED` /
+   `STARTUP_FAILURE`, the review step is skipped entirely. Auto-fix may still
+   run on the same PR — see the next section.
+2. **Already reviewed and no new commits since.** When an existing comment
+   body contains the built-in marker (`<!-- claude-auto-mergeable-check -->`)
+   and no commit has been pushed after that comment, the review is skipped.
+   Comments posted by the tool always include the marker (an HTML comment) at
+   the top, so PRs whose HEAD has moved (via rebase or extra commits) are
+   automatically re-reviewed on the next run.
+
+Auto-fix is driven by the live CI status, not by these rules; see the next
+section.
 
 ## Auto-fix on CI failure (opt-in)
 
-Auto-fix runs whenever the PR's CI is failing and either of the following
-is true:
+Auto-fix runs after the review skip check, only when **all** of the
+following hold:
 
-- `auto_fix_ci = true` in `config.toml`
-- The PR has the `auto_fix_label` (default `claude-auto-fix`)
+- The PR's CI is currently failing (same conclusions as in the previous section)
+- Either `auto_fix_ci = true` in `config.toml`, or the PR carries the
+  `auto_fix_label` (default `claude-auto-fix`)
+- At least one of the failing checks exposes a GitHub Actions run ID via
+  its `detailsUrl` (status contexts without a `targetUrl`, e.g. Renovate's
+  own status, cannot supply logs and are silently skipped)
 
-It is evaluated **independently of the review-skip decision**. A PR whose
-review is being skipped (existing marker + no new commits) will still
-have auto-fix run if CI is currently failing. As a consequence, a PR
-where the previous auto-fix attempt did not resolve the failure will be
-re-tried on every run — bounded by the prompt's "give up after 3 attempts"
-rule and your cron interval.
+Because auto-fix is gated on the live CI state, a PR whose previous fix
+attempt did not resolve the failure will be retried on every run. The only
+backstops are the prompt's "give up after 3 attempts" rule and your cron
+interval.
 
 Behavior:
 
-1. `gh pr view --json statusCheckRollup` detects failing checks
-2. `gh run view <runID> --log-failed` fetches the failing job's logs (last 50KB)
-3. `os.MkdirTemp` creates an isolated working directory passed to Claude via
-   `cmd.Dir`. It is deleted on exit via `defer os.RemoveAll`
-4. The Claude prompt enforces:
-   - No `git commit --amend` / `git rebase` / `git reset` / `git push --force` family
-   - No `gh pr edit` (never touch the rebase checkbox in the PR body)
-   - Keep existing Renovate commits intact; add exactly one new commit on top
-   - No major breaking changes; if deemed unfixable, post a comment only without pushing
-5. On completion, print `PUSHED` (when a push happened) or `POSTED` (comment-only) on the final line
+1. `gh pr view --json statusCheckRollup` detects failing checks; failing
+   check `detailsUrl` values are scanned for Actions run IDs
+2. `gh run view <runID> --log-failed` fetches each failing job's logs
+   (tail-truncated to the last 50KB). If no run ID could be extracted,
+   auto-fix is skipped without invoking Claude
+3. `os.MkdirTemp` (under `work_dir`, defaulting to `os.TempDir()`) creates
+   an isolated working directory passed to Claude via `cmd.Dir`; it is
+   removed on exit via `defer os.RemoveAll`
+4. Claude checks out the PR branch with `gh pr checkout`, identifies the
+   root cause, applies a minimal fix, and verifies it locally before
+   committing as `fix(ci): <summary> [claude-auto-fix]` and pushing
+5. On completion, Claude prints `PUSHED` (push + comment) or `POSTED`
+   (comment-only) on the final line
 
-### Convention for pushing to a Renovate branch
+The fix prompt enforces:
+
+- No `git commit --amend` / `git rebase` / `git reset --hard` /
+  `git push --force` / `git push --force-with-lease`
+- No `gh pr edit` (never touch the rebase checkbox in the PR body)
+- Keep existing Renovate commits intact; add exactly one new commit on top
+- Only minor fixes are in scope (type fixes, test adjustments, lockfile
+  regeneration); major breaking changes are out of scope
+
+The prompt falls back to a `❌ unfixable` comment **without pushing** when:
+
+- A major breaking change would be required (e.g. an API-incompatible upgrade)
+- A lockfile regeneration alone cannot make the tests pass
+- The fix would require API keys, secrets, or external network access
+- Build or test still fails after 3 attempts
+
+### Caveat: pushing to a Renovate branch
 
 Renovate **stops updating any PR branch that has another author's commits on
-it** (official behavior). So while pushing itself is allowed, note that:
+it** (official behavior). So while pushing is allowed, note that:
 
 - Ticking the **rebase checkbox** in the PR body or attaching the **`rebase`
   label** causes Renovate to force-rebase the branch, wiping out the manual
   commit
 - Renovate will not update that branch afterward, so whoever pushed becomes
-  responsible for getting the PR to merge
+  responsible for getting the PR merged
 
 The tool guards against this by excluding `gh pr edit` from `allowedTools`
 and by repeatedly forbidding it in the prompt, so Claude does not
-accidentally touch these.
+accidentally toggle the checkbox or attach the label.
 
-CI auto-fix does not fire under `-dry-run` either.
+CI auto-fix is also skipped under `-dry-run`.
 
 ## Known limitations
 
 - Claude CLI usage costs scale with the number of PRs
-- In case the `--permission-mode auto` classifier soft-denies `gh pr comment`,
-  it is explicitly allowed via `--allowedTools`
-- Parallel execution is not supported (PRs are processed sequentially)
+- The `--permission-mode auto` classifier sometimes soft-denies
+  `gh pr comment`, so it is explicitly granted via `--allowedTools`
+- PRs are processed sequentially; parallel execution is not supported
 - The auto-fix flow cannot block `git push --force` family commands via the
   `allowedTools` prefix match, so it relies on the prompt's explicit prohibition
+- The process exits with code `1` whenever any PR-level step fails, even
+  if other PRs in the same run succeeded. A non-zero exit signals "at least
+  one PR failed", not "no work happened" — useful for cron alerts
