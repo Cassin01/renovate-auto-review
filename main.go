@@ -137,11 +137,20 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool) (proc
 			continue
 		}
 
+		checks, checksErr := fetchPRChecks(repo, pr.Number)
+		if checksErr != nil {
+			log.Printf("%s #%d: fetch checks: %v (proceeding without CI status)", repo, pr.Number, checksErr)
+		}
+		ciFailing := checksErr == nil && hasFailingChecks(checks)
+
 		actionRan := false
 
-		if shouldSkipReview(comments, commits, marker) {
+		switch {
+		case ciFailing:
+			fmt.Fprintln(os.Stdout, "review skip: CI is failing")
+		case shouldSkipReview(comments, commits, marker):
 			fmt.Fprintln(os.Stdout, "review skip: marker present and no new commits since")
-		} else {
+		default:
 			res, err := runClaudeAutoMode(claudeBin, repo, pr.Number, marker, cfg.CustomPrompt)
 			if res != nil && res.Stdout != "" {
 				fmt.Fprintln(os.Stdout, "--- claude output ---")
@@ -156,8 +165,8 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool) (proc
 			}
 		}
 
-		if cfg.AutoFixCI || hasAutoFixLabel(pr, cfg.AutoFixLabel) {
-			ran, err := tryFixCI(claudeBin, repo, marker, cfg, pr)
+		if ciFailing && (cfg.AutoFixCI || hasAutoFixLabel(pr, cfg.AutoFixLabel)) {
+			ran, err := tryFixCI(claudeBin, repo, marker, cfg, pr, checks)
 			if err != nil {
 				log.Printf("%s #%d: auto-fix: %v", repo, pr.Number, err)
 				failed++
@@ -177,18 +186,10 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool) (proc
 }
 
 // tryFixCI returns ran=true only when Claude fix mode was actually invoked.
-// Early exits (CI passing, no Actions log) and pre-invocation errors return
-// ran=false so the caller can distinguish "no-op" from "attempted".
-func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR) (bool, error) {
-	checks, err := fetchPRChecks(repo, pr.Number)
-	if err != nil {
-		return false, fmt.Errorf("fetch checks: %w", err)
-	}
-	if !hasFailingChecks(checks) {
-		fmt.Fprintln(os.Stdout, "auto-fix: no failing checks, skip")
-		return false, nil
-	}
-
+// Early exits (no Actions log) and pre-invocation errors return ran=false so
+// the caller can distinguish "no-op" from "attempted". The caller is
+// responsible for ensuring checks contains failing entries.
+func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR, checks []CheckRun) (bool, error) {
 	runIDs := pickFailedRunIDs(checks)
 	var logs strings.Builder
 	for _, id := range runIDs {
