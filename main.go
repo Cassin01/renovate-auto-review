@@ -40,8 +40,7 @@ func main() {
 
 	cfg, err := loadConfig(path)
 	if err != nil {
-		var nf *configNotFoundError
-		if errors.As(err, &nf) {
+		if nf, ok := errors.AsType[*configNotFoundError](err); ok {
 			fmt.Fprintf(os.Stderr, "error: %s\n\nplease create %s with the following template:\n\n%s\n",
 				err, nf.Path, sampleConfig)
 			os.Exit(1)
