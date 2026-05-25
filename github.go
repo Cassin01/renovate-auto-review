@@ -113,6 +113,34 @@ func shouldSkipReview(comments []Comment, commits []Commit, marker string) bool 
 	return !lastCommitAt.After(lastMarkerAt)
 }
 
+func fetchPRFiles(repo string, prNumber int) ([]string, error) {
+	out, err := exec.Command(
+		"gh", "pr", "view", strconv.Itoa(prNumber),
+		"--repo", repo,
+		"--json", "files",
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh pr view files: %w (stderr: %s)", err, stderrOf(err))
+	}
+	return decodePRFiles(out)
+}
+
+func decodePRFiles(raw []byte) ([]string, error) {
+	var data struct {
+		Files []struct {
+			Path string `json:"path"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, fmt.Errorf("decode pr view files: %w", err)
+	}
+	paths := make([]string, 0, len(data.Files))
+	for _, f := range data.Files {
+		paths = append(paths, f.Path)
+	}
+	return paths, nil
+}
+
 type CheckRun struct {
 	Name         string `json:"name"`
 	Conclusion   string `json:"conclusion"`
