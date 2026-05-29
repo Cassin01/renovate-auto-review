@@ -40,13 +40,17 @@ func main() {
 
 	cfg, err := loadConfig(path)
 	if err != nil {
-		var nf *configNotFoundError
-		if errors.As(err, &nf) {
+		if nf, ok := errors.AsType[*configNotFoundError](err); ok {
 			fmt.Fprintf(os.Stderr, "error: %s\n\nplease create %s with the following template:\n\n%s\n",
 				err, nf.Path, sampleConfig)
 			os.Exit(1)
 		}
 		log.Fatalf("load config: %v", err)
+	}
+
+	if err := checkOwnerAllowed(repo, cfg.AllowedOwners); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
 
 	if err := runAll(cfg, []string{repo}, *dryRun); err != nil {
@@ -166,13 +170,22 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool) (proc
 		}
 
 		if ciFailing && (cfg.AutoFixCI || hasAutoFixLabel(pr, cfg.AutoFixLabel)) {
-			ran, err := tryFixCI(claudeBin, repo, marker, cfg, pr, checks)
+			handled, ran, err := tryFixLockfileForPR(repo, marker, cfg, pr)
 			if err != nil {
-				log.Printf("%s #%d: auto-fix: %v", repo, pr.Number, err)
-				failed++
+				log.Printf("%s #%d: lockfile-fix: %v", repo, pr.Number, err)
 			}
 			if ran {
 				actionRan = true
+			}
+			if !handled {
+				ran, err := tryFixCI(claudeBin, repo, marker, cfg, pr, checks)
+				if err != nil {
+					log.Printf("%s #%d: auto-fix: %v", repo, pr.Number, err)
+					failed++
+				}
+				if ran {
+					actionRan = true
+				}
 			}
 		}
 
@@ -183,6 +196,57 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool) (proc
 		}
 	}
 	return processed, skipped, failed
+}
+
+// tryFixLockfileForPR runs the deterministic lockfile-only fix path when the
+// PR exclusively modifies manifest/lock files of a supported ecosystem.
+//
+// Return values:
+//   - handled=true means the lockfile path took responsibility for this PR
+//     and the caller MUST skip Claude. This includes both push success and
+//     deliberate decisions like "regen produced no diff, but a Claude retry
+//     would produce the same no-op."
+//   - handled=false means the PR is out of scope for this path; the caller
+//     should fall through to the Claude-based recovery.
+//   - ran=true means an externally-visible action occurred (push + comment).
+func tryFixLockfileForPR(repo, marker string, cfg *Config, pr PR) (handled, ran bool, err error) {
+	files, err := fetchPRFiles(repo, pr.Number)
+	if err != nil {
+		return false, false, fmt.Errorf("fetch pr files: %w", err)
+	}
+	eco := detectLockfileEcosystem(files)
+	if eco == nil {
+		return false, false, nil
+	}
+
+	workDir, err := os.MkdirTemp(cfg.WorkDir, fmt.Sprintf("rar-lock-%d-", pr.Number))
+	if err != nil {
+		return true, false, fmt.Errorf("mkdir workdir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(workDir) }()
+	fmt.Fprintf(os.Stdout, "lockfile-fix: ecosystem=%s workDir=%s files=%v\n", eco.name, workDir, files)
+
+	res, runErr := runLockfileFix(defaultCommandRunner, repo, marker, workDir, pr, eco)
+	if res != nil && res.VerifyOutput != "" {
+		fmt.Fprintln(os.Stdout, "--- lockfile verify output ---")
+		fmt.Fprintln(os.Stdout, res.VerifyOutput)
+		fmt.Fprintln(os.Stdout, "--- end ---")
+	}
+	switch {
+	case runErr != nil:
+		// Fall back to the Claude path so a richer reasoning loop has a
+		// chance to address the underlying breakage.
+		return false, false, runErr
+	case res.NoDiff:
+		// A no-op regen means the CI failure is not a lockfile-drift
+		// problem. Delegate to Claude.
+		fmt.Fprintln(os.Stdout, "lockfile-fix: regen produced no diff; falling through to Claude")
+		return false, false, nil
+	case res.Pushed:
+		return true, true, nil
+	default:
+		return false, false, nil
+	}
 }
 
 // tryFixCI returns ran=true only when Claude fix mode was actually invoked.

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -55,7 +56,7 @@ func TestApplyConfigDefaults(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.in
 			applyConfigDefaults(&got)
-			if got != tc.want {
+			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("applyConfigDefaults() = %+v, want %+v", got, tc.want)
 			}
 		})

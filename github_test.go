@@ -357,6 +357,59 @@ func TestTailBytes(t *testing.T) {
 	}
 }
 
+func TestDecodePRFiles(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		want    []string
+		wantErr bool
+	}{
+		{
+			name: "go renovate PR",
+			raw:  `{"files":[{"path":"go.mod","additions":1,"deletions":1},{"path":"go.sum","additions":2,"deletions":2}]}`,
+			want: []string{"go.mod", "go.sum"},
+		},
+		{
+			name: "empty files",
+			raw:  `{"files":[]}`,
+			want: []string{},
+		},
+		{
+			name: "subdirectory paths preserved",
+			raw:  `{"files":[{"path":"api/go.mod"},{"path":"api/go.sum"}]}`,
+			want: []string{"api/go.mod", "api/go.sum"},
+		},
+		{
+			name:    "malformed json",
+			raw:     `not json`,
+			wantErr: true,
+		},
+		{
+			name: "missing files key returns empty",
+			raw:  `{}`,
+			want: []string{},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := decodePRFiles([]byte(tc.raw))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decodePRFiles: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("decodePRFiles() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStderrOf(t *testing.T) {
 	cases := []struct {
 		name string

@@ -41,8 +41,21 @@ The target repository is specified on the command line — see [Usage](#usage).
 | `auto_fix_label`  | string   | `"claude-auto-fix"` | Per-PR opt-in label. A PR with this label is treated as if `auto_fix_ci = true` |
 | `work_dir`        | string   | `os.TempDir()`      | Parent directory for temporary work dirs used during CI auto-fix           |
 | `custom_prompt`   | string   | `""`                | Extra instructions appended to every Claude prompt (see below)             |
+| `allowed_owners`  | []string | `[]`                | Domain guard: allowed repository owners (see below). Empty = disabled       |
 
 Unknown keys produce a warning on stderr (helps catch typos).
+
+### `allowed_owners`
+
+A safety guard against running the tool on an unintended repository. The
+`owner` part of the `<owner/name>` argument is matched case-insensitively
+against this list; if it is not present, the tool exits with an error before
+any `gh` or `claude` invocation (including `-dry-run`). An empty or omitted
+list disables the guard and permits any owner.
+
+```toml
+allowed_owners = ["Cassin01", "my-org"]
+```
 
 ### `custom_prompt`
 

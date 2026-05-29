@@ -18,6 +18,8 @@ type Config struct {
 	WorkDir      string `toml:"work_dir"`
 	CustomPrompt string `toml:"custom_prompt"`
 
+	AllowedOwners []string `toml:"allowed_owners"`
+
 	SourcePath string `toml:"-"`
 }
 
@@ -98,4 +100,9 @@ auto_fix_ci = false
 # "[Additional instructions]" section. Useful for overriding output language,
 # tone, or adding project-specific constraints. Leave empty to disable.
 # custom_prompt = "Write the PR comment body in Japanese."
+
+# Domain guard: only operate on repositories owned by these GitHub users/orgs.
+# Matched case-insensitively against the "owner" part of the "owner/name"
+# argument. Empty or unset = guard disabled (any owner allowed).
+# allowed_owners = ["Cassin01", "my-org"]
 `
