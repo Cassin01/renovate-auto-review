@@ -112,6 +112,7 @@ const fixPromptTemplate = `Target: %s PR #%d (Renovate auto-update). Make a mini
 - Do not use ` + "`gh pr edit`" + ` (never touch the rebase checkbox in the PR body)
 - Keep existing Renovate commits intact; add exactly one new commit on top
 - Do not attempt major breaking changes to dependencies (only minor type fixes, test adjustments, lockfile regeneration)
+- Never push without first running the project's own lint/test/build locally and confirming they pass. Verification (installing deps, regenerating artifacts, running the failing job) is part of the fix — never split it off as "the fix needs no network, only verification does" to justify an unverified push
 
 [Steps]
 1. ` + "`gh pr checkout %d --repo %s`" + ` to check out the branch
@@ -119,10 +120,11 @@ const fixPromptTemplate = `Target: %s PR #%d (Renovate auto-update). Make a mini
 ---
 %s
 ---
-3. Apply a minimal source fix and verify locally with build/test (e.g. ` + "`go build ./...`" + ` / ` + "`go test ./...`" + `)
-4. ` + "`git add`" + ` -> ` + "`git commit -m \"fix(ci): <summary> [claude-auto-fix]\"`" + `
-5. ` + "`git push origin HEAD:%s`" + ` (no force-style options)
-6. Post the following template via ` + "`gh pr comment %d --repo %s --body-file -`" + `:
+3. Determine the project's actual lint/test/build commands from its CI config and manifests — do NOT assume Go. Inspect ` + "`.github/workflows`" + `, ` + "`package.json`" + ` scripts, ` + "`Makefile`" + `, or equivalent, and reproduce the failing job's commands locally
+4. Apply a minimal source fix, then re-run those same commands locally until every one passes. You MUST observe a green local run mirroring the failed CI job before pushing
+5. ` + "`git add`" + ` -> ` + "`git commit -m \"fix(ci): <summary> [claude-auto-fix]\"`" + `
+6. ` + "`git push origin HEAD:%s`" + ` (no force-style options)
+7. Post the following template via ` + "`gh pr comment %d --repo %s --body-file -`" + `:
 
 %s
 ## Claude auto-fix
@@ -136,6 +138,7 @@ If any of the following applies, **do not push** — post a ❌ unfixable commen
 - A major breaking change is required (e.g. an API-incompatible library upgrade)
 - A compound change that lockfile regeneration alone cannot make tests pass
 - The fix requires API keys, secrets, or external network access
+- The project's lint/test/build cannot be run locally at all (e.g. dependencies cannot be installed, or verification needs secrets, external network, or a live endpoint) — an unverifiable fix MUST NOT be pushed
 - Build or test still fails after 3 attempts
 
 %s[Output protocol]

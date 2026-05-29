@@ -154,8 +154,11 @@ Behavior:
    an isolated working directory passed to Claude via `cmd.Dir`; it is
    removed on exit via `defer os.RemoveAll`
 4. Claude checks out the PR branch with `gh pr checkout`, identifies the
-   root cause, applies a minimal fix, and verifies it locally before
-   committing as `fix(ci): <summary> [claude-auto-fix]` and pushing
+   root cause, applies a minimal fix, then reproduces the failing CI job
+   locally using the project's own commands (discovered from
+   `.github/workflows`, `package.json`, `Makefile`, etc. — not assumed to
+   be Go) and confirms a green run before committing as
+   `fix(ci): <summary> [claude-auto-fix]` and pushing
 5. On completion, Claude prints `PUSHED` (push + comment) or `POSTED`
    (comment-only) on the final line
 
@@ -167,12 +170,17 @@ The fix prompt enforces:
 - Keep existing Renovate commits intact; add exactly one new commit on top
 - Only minor fixes are in scope (type fixes, test adjustments, lockfile
   regeneration); major breaking changes are out of scope
+- No push without a green local lint/test/build run that mirrors the failed
+  CI job — verification is part of the fix and cannot be skipped
 
 The prompt falls back to a `❌ unfixable` comment **without pushing** when:
 
 - A major breaking change would be required (e.g. an API-incompatible upgrade)
 - A lockfile regeneration alone cannot make the tests pass
 - The fix would require API keys, secrets, or external network access
+- The project's lint/test/build cannot be run locally at all (e.g. deps
+  cannot be installed, or verification needs secrets / network / a live
+  endpoint) — an unverifiable fix is never pushed
 - Build or test still fails after 3 attempts
 
 ### Caveat: pushing to a Renovate branch

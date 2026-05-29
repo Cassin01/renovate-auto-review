@@ -152,6 +152,40 @@ func TestBuildFixPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildFixPromptVerificationGate(t *testing.T) {
+	got := buildFixPrompt("owner/repo", 7, "renovate/x", "<!-- m -->", "/tmp/w", "error", "")
+
+	t.Run("project-agnostic command discovery", func(t *testing.T) {
+		for _, want := range []string{".github/workflows", "package.json", "Makefile"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("expected command-discovery hint %q, not found", want)
+			}
+		}
+	})
+
+	t.Run("no go-specific verification example", func(t *testing.T) {
+		for _, bad := range []string{"go build ./...", "go test ./..."} {
+			if strings.Contains(got, bad) {
+				t.Errorf("Go-specific example %q should be removed", bad)
+			}
+		}
+	})
+
+	t.Run("mandatory green local run before push", func(t *testing.T) {
+		for _, want := range []string{"pass", "before pushing"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("expected mandatory-verification phrase %q, not found", want)
+			}
+		}
+	})
+
+	t.Run("fallback covers unverifiable projects", func(t *testing.T) {
+		if !strings.Contains(got, "cannot be run locally") {
+			t.Errorf("expected fallback for projects that cannot be verified locally")
+		}
+	})
+}
+
 func TestBuildFixPromptWithCustomPrompt(t *testing.T) {
 	cases := []struct {
 		name   string
