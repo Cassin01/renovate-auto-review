@@ -155,12 +155,9 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool) (proc
 		case shouldSkipReview(comments, commits, marker):
 			fmt.Fprintln(os.Stdout, "review skip: marker present and no new commits since")
 		default:
-			res, err := runClaudeAutoMode(claudeBin, repo, pr.Number, marker, cfg.CustomPrompt)
-			if res != nil && res.Stdout != "" {
-				fmt.Fprintln(os.Stdout, "--- claude output ---")
-				fmt.Fprintln(os.Stdout, res.Stdout)
-				fmt.Fprintln(os.Stdout, "--- end ---")
-			}
+			fmt.Fprintln(os.Stdout, "--- claude output ---")
+			err := runClaudeAutoMode(claudeBin, repo, pr.Number, marker, cfg.CustomPrompt, os.Stdout)
+			fmt.Fprintln(os.Stdout, "--- end ---")
 			if err != nil {
 				log.Printf("%s #%d: %v", repo, pr.Number, err)
 				failed++
@@ -276,11 +273,8 @@ func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR, checks []Check
 	defer func() { _ = os.RemoveAll(workDir) }()
 	fmt.Fprintf(os.Stdout, "auto-fix: workDir=%s, failing checks=%d\n", workDir, len(runIDs))
 
-	res, err := runClaudeFixMode(claudeBin, repo, pr.Number, pr.HeadRefName, marker, workDir, logs.String(), cfg.CustomPrompt)
-	if res != nil && res.Stdout != "" {
-		fmt.Fprintln(os.Stdout, "--- claude fix output ---")
-		fmt.Fprintln(os.Stdout, res.Stdout)
-		fmt.Fprintln(os.Stdout, "--- end ---")
-	}
+	fmt.Fprintln(os.Stdout, "--- claude fix output ---")
+	err = runClaudeFixMode(claudeBin, repo, pr.Number, pr.HeadRefName, marker, workDir, logs.String(), cfg.CustomPrompt, os.Stdout)
+	fmt.Fprintln(os.Stdout, "--- end ---")
 	return true, err
 }

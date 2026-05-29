@@ -1,9 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os/exec"
-	"strconv"
 	"strings"
 )
 
@@ -56,12 +57,20 @@ func additionalInstructionsBlock(s string) string {
 	return "[Additional instructions]\n" + s + "\n\n"
 }
 
-type claudeResult struct {
-	Stdout string
-	Posted bool
+// streamCombined runs cmd, forwarding its stdout and stderr to out in real
+// time while also capturing them for caller-side inspection. Assigning the
+// same writer to Stdout and Stderr lets exec serialize writes, so the shared
+// buffer is never written concurrently.
+func streamCombined(cmd *exec.Cmd, out io.Writer) (string, error) {
+	var buf bytes.Buffer
+	w := io.MultiWriter(out, &buf)
+	cmd.Stdout = w
+	cmd.Stderr = w
+	err := cmd.Run()
+	return buf.String(), err
 }
 
-func runClaudeAutoMode(claudeBin, repo string, prNumber int, marker, customPrompt string) (*claudeResult, error) {
+func runClaudeAutoMode(claudeBin, repo string, prNumber int, marker, customPrompt string, out io.Writer) error {
 	prompt := buildPrompt(repo, prNumber, marker, customPrompt)
 	cmd := exec.Command(
 		claudeBin,
@@ -72,18 +81,14 @@ func runClaudeAutoMode(claudeBin, repo string, prNumber int, marker, customPromp
 		"Bash(gh pr view:*) Bash(gh pr diff:*) Bash(gh pr checks:*) Bash(gh pr comment:*)",
 		"-p", prompt,
 	)
-	out, err := cmd.CombinedOutput()
-	res := &claudeResult{
-		Stdout: string(out),
-		Posted: strings.Contains(string(out), "POSTED"),
-	}
+	captured, err := streamCombined(cmd, out)
 	if err != nil {
-		return res, fmt.Errorf("claude exec failed for PR #%s: %w", strconv.Itoa(prNumber), err)
+		return fmt.Errorf("claude exec failed for PR #%d: %w", prNumber, err)
 	}
-	if !res.Posted {
-		return res, fmt.Errorf("claude did not report POSTED for PR #%d", prNumber)
+	if !strings.Contains(captured, "POSTED") {
+		return fmt.Errorf("claude did not report POSTED for PR #%d", prNumber)
 	}
-	return res, nil
+	return nil
 }
 
 const fixPromptTemplate = `Target: %s PR #%d (Renovate auto-update). Make a minimal local fix for the failing CI and push directly to the PR branch ` + "`%s`" + `.
@@ -150,7 +155,7 @@ const fixAllowedTools = "Bash(gh pr view:*) Bash(gh pr diff:*) Bash(gh pr checks
 	"Bash(ls:*) Bash(cat:*) Bash(rg:*) Bash(fd:*) " +
 	"Read Write Edit Glob Grep"
 
-func runClaudeFixMode(claudeBin, repo string, prNumber int, headRef, marker, workDir, logs, customPrompt string) (*claudeResult, error) {
+func runClaudeFixMode(claudeBin, repo string, prNumber int, headRef, marker, workDir, logs, customPrompt string, out io.Writer) error {
 	prompt := buildFixPrompt(repo, prNumber, headRef, marker, workDir, logs, customPrompt)
 	cmd := exec.Command(
 		claudeBin,
@@ -161,16 +166,12 @@ func runClaudeFixMode(claudeBin, repo string, prNumber int, headRef, marker, wor
 		"-p", prompt,
 	)
 	cmd.Dir = workDir
-	out, err := cmd.CombinedOutput()
-	res := &claudeResult{
-		Stdout: string(out),
-		Posted: strings.Contains(string(out), "POSTED") || strings.Contains(string(out), "PUSHED"),
-	}
+	captured, err := streamCombined(cmd, out)
 	if err != nil {
-		return res, fmt.Errorf("claude fix exec failed for PR #%d: %w", prNumber, err)
+		return fmt.Errorf("claude fix exec failed for PR #%d: %w", prNumber, err)
 	}
-	if !res.Posted {
-		return res, fmt.Errorf("claude did not report PUSHED or POSTED for PR #%d", prNumber)
+	if !strings.Contains(captured, "POSTED") && !strings.Contains(captured, "PUSHED") {
+		return fmt.Errorf("claude did not report PUSHED or POSTED for PR #%d", prNumber)
 	}
-	return res, nil
+	return nil
 }
