@@ -1,0 +1,10 @@
+{"type":"system","subtype":"init","session_id":"sess-abc","model":"claude-opus-4-8","tools":["Bash"]}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Reviewing PR #42."}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"gh pr view 42 --repo o/r"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"title: bump foo to 1.2.3\nstate: OPEN\nmergeable: MERGEABLE"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"gh pr diff 42 --repo o/r"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":[{"type":"text","text":"diff --git a/go.mod b/go.mod\nindex 1111111..2222222 100644\n--- a/go.mod\n+++ b/go.mod\n@@ -3,7 +3,7 @@ go 1.26\n-\tgithub.com/foo/bar v1.2.2\n+\tgithub.com/foo/bar v1.2.3\n and a lot more diff content that keeps going well beyond two hundred characters so that the truncation logic has something substantial to cut off here"}]}]}}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t3","name":"Bash","input":{"command":"gh pr comment 42 --repo o/r --body-file -"}}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Comment posted."}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"POSTED"}

@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","session_id":"sess-xyz","model":"claude-opus-4-8"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Fixing CI for PR #7."}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"f1","name":"Bash","input":{"command":"go test ./..."}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"f1","content":"ok  example  0.12s"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"f2","name":"Bash","input":{"command":"git push origin HEAD:renovate/foo"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"f2","content":"To github.com:o/r.git\n   abc..def  HEAD -> renovate/foo"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"PUSHED"}

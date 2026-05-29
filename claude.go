@@ -57,17 +57,29 @@ func additionalInstructionsBlock(s string) string {
 	return "[Additional instructions]\n" + s + "\n\n"
 }
 
-// streamCombined runs cmd, forwarding its stdout and stderr to out in real
-// time while also capturing them for caller-side inspection. Assigning the
-// same writer to Stdout and Stderr lets exec serialize writes, so the shared
-// buffer is never written concurrently.
-func streamCombined(cmd *exec.Cmd, out io.Writer) (string, error) {
-	var buf bytes.Buffer
-	w := io.MultiWriter(out, &buf)
-	cmd.Stdout = w
-	cmd.Stderr = w
-	err := cmd.Run()
-	return buf.String(), err
+// runClaudeStreaming starts cmd, renders its stream-json stdout to out as a
+// human-readable progress trace, and returns the detection text (final result
+// or concatenated assistant text). stdout is consumed fully before Wait;
+// stderr is buffered and flushed afterwards so it never races with out.
+func runClaudeStreaming(cmd *exec.Cmd, out io.Writer) (string, error) {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+	resultText, renderErr := renderClaudeStream(stdout, out)
+	waitErr := cmd.Wait()
+	if stderr.Len() > 0 {
+		fmt.Fprint(out, stderr.String())
+	}
+	if waitErr != nil {
+		return resultText, waitErr
+	}
+	return resultText, renderErr
 }
 
 func runClaudeAutoMode(claudeBin, repo string, prNumber int, marker, customPrompt string, out io.Writer) error {
@@ -76,16 +88,17 @@ func runClaudeAutoMode(claudeBin, repo string, prNumber int, marker, customPromp
 		claudeBin,
 		"--permission-mode", "auto",
 		"--print",
-		"--output-format", "text",
+		"--output-format", "stream-json",
+		"--verbose",
 		"--allowedTools",
 		"Bash(gh pr view:*) Bash(gh pr diff:*) Bash(gh pr checks:*) Bash(gh pr comment:*)",
 		"-p", prompt,
 	)
-	captured, err := streamCombined(cmd, out)
+	resultText, err := runClaudeStreaming(cmd, out)
 	if err != nil {
 		return fmt.Errorf("claude exec failed for PR #%d: %w", prNumber, err)
 	}
-	if !strings.Contains(captured, "POSTED") {
+	if !strings.Contains(resultText, "POSTED") {
 		return fmt.Errorf("claude did not report POSTED for PR #%d", prNumber)
 	}
 	return nil
@@ -161,16 +174,17 @@ func runClaudeFixMode(claudeBin, repo string, prNumber int, headRef, marker, wor
 		claudeBin,
 		"--permission-mode", "auto",
 		"--print",
-		"--output-format", "text",
+		"--output-format", "stream-json",
+		"--verbose",
 		"--allowedTools", fixAllowedTools,
 		"-p", prompt,
 	)
 	cmd.Dir = workDir
-	captured, err := streamCombined(cmd, out)
+	resultText, err := runClaudeStreaming(cmd, out)
 	if err != nil {
 		return fmt.Errorf("claude fix exec failed for PR #%d: %w", prNumber, err)
 	}
-	if !strings.Contains(captured, "POSTED") && !strings.Contains(captured, "PUSHED") {
+	if !strings.Contains(resultText, "POSTED") && !strings.Contains(resultText, "PUSHED") {
 		return fmt.Errorf("claude did not report PUSHED or POSTED for PR #%d", prNumber)
 	}
 	return nil
