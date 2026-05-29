@@ -48,6 +48,11 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
+	if err := checkOwnerAllowed(repo, cfg.AllowedOwners); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
 	if err := runAll(cfg, []string{repo}, *dryRun); err != nil {
 		log.Fatalf("fatal: %v", err)
 	}

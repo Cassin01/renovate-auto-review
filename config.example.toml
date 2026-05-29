@@ -10,3 +10,8 @@ limit = 50
 # Optional: appended to every Claude prompt as "[Additional instructions]".
 # Use to override output language, tone, or add project-specific constraints.
 # custom_prompt = "Write the PR comment body in Japanese."
+
+# Domain guard: only operate on repositories owned by these GitHub users/orgs.
+# Matched case-insensitively against the "owner" part of the "owner/name"
+# argument. Empty or unset = guard disabled (any owner allowed).
+# allowed_owners = ["Cassin01", "my-org"]
