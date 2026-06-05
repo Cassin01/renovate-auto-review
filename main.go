@@ -265,6 +265,10 @@ func tryFixLockfileForPR(repo, marker string, cfg *Config, pr PR) (handled, ran 
 func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR, checks []CheckRun) (bool, error) {
 	runIDs := pickFailedRunIDs(checks)
 	var logs strings.Builder
+	// Distinguish "no run was actionable" from "an actionable run's logs could
+	// not be retrieved" so the skip message does not misattribute a log-
+	// availability problem to run state.
+	logUnavailable := false
 	for _, id := range runIDs {
 		// The rollup that produced runIDs can lag the run's actual state: a
 		// re-run may have since turned green, or the failure may be a
@@ -273,6 +277,7 @@ func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR, checks []Check
 		st, err := fetchRunState(repo, id)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, serr.warn(fmt.Sprintf("warn: run %s state lookup failed: %v; skipping", id, err)))
+			logUnavailable = true
 			continue
 		}
 		if !strings.EqualFold(st.Status, "completed") || !isGenuineCIFailure(st.Conclusion) {
@@ -284,12 +289,17 @@ func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR, checks []Check
 		runLog, err := fetchFailedRunLog(repo, id)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, serr.warn(fmt.Sprintf("warn: fetch run %s log: %v", id, err)))
+			logUnavailable = true
 			continue
 		}
 		fmt.Fprintf(&logs, "===== run %s =====\n%s\n", id, runLog)
 	}
 	if logs.Len() == 0 {
-		fmt.Fprintln(os.Stdout, sout.warn("auto-fix: no actionable failing Actions run (re-run succeeded, cancelled, or renovate-side status). Skipping."))
+		if logUnavailable {
+			fmt.Fprintln(os.Stdout, sout.warn("auto-fix: failing run is actionable but its logs are unavailable from GitHub (archive incomplete or state lookup failed). Skipping."))
+		} else {
+			fmt.Fprintln(os.Stdout, sout.warn("auto-fix: no actionable failing Actions run (re-run succeeded, cancelled, or renovate-side status). Skipping."))
+		}
 		return false, nil
 	}
 

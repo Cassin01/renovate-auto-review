@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -271,9 +272,21 @@ func fetchFailedRunLog(repo, runID string) (string, error) {
 		"--log-failed",
 	).Output()
 	if err != nil {
+		if partialFailedLog(out, err) {
+			return tailBytes(string(out), maxFailedLogBytes), nil
+		}
 		return "", fmt.Errorf("gh run view %s --log-failed: %w (stderr: %s)", runID, err, stderrOf(err))
 	}
 	return tailBytes(string(out), maxFailedLogBytes), nil
+}
+
+// partialFailedLog reports whether a non-zero `gh run view --log-failed` still
+// produced usable logs. When a failed job's log is missing from the run archive
+// (a known gap on self-hosted runners) gh exits non-zero with "log not found:
+// <jobID>" yet still streams the other failed jobs' logs to stdout. Those
+// remain a valid basis for auto-fix, so they are salvaged rather than discarded.
+func partialFailedLog(stdout []byte, err error) bool {
+	return len(bytes.TrimSpace(stdout)) > 0 && strings.Contains(stderrOf(err), "log not found")
 }
 
 func tailBytes(s string, max int) string {

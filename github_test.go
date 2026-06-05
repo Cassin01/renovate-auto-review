@@ -457,3 +457,51 @@ func TestStderrOf(t *testing.T) {
 		})
 	}
 }
+
+func TestPartialFailedLog(t *testing.T) {
+	cases := []struct {
+		name   string
+		stdout []byte
+		err    error
+		want   bool
+	}{
+		{
+			name:   "log not found with usable stdout",
+			stdout: []byte("unit_test\tstep\tboom\n"),
+			err:    &exec.ExitError{Stderr: []byte("log not found: 77104140470\n")},
+			want:   true,
+		},
+		{
+			name:   "log not found but no stdout",
+			stdout: nil,
+			err:    &exec.ExitError{Stderr: []byte("log not found: 77104730178\n")},
+			want:   false,
+		},
+		{
+			name:   "log not found but stdout is whitespace only",
+			stdout: []byte("  \n\t"),
+			err:    &exec.ExitError{Stderr: []byte("log not found: 1\n")},
+			want:   false,
+		},
+		{
+			name:   "unrelated error with stdout is not salvaged",
+			stdout: []byte("partial\n"),
+			err:    &exec.ExitError{Stderr: []byte("HTTP 404: Not Found\n")},
+			want:   false,
+		},
+		{
+			name:   "nil error",
+			stdout: []byte("logs\n"),
+			err:    nil,
+			want:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := partialFailedLog(tc.stdout, tc.err); got != tc.want {
+				t.Errorf("partialFailedLog(): want %v, got %v", tc.want, got)
+			}
+		})
+	}
+}
