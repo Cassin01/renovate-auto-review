@@ -224,6 +224,44 @@ func hasAutoFixLabel(pr PR, label string) bool {
 	return false
 }
 
+// RunState is the current status/conclusion of a GitHub Actions run, fetched
+// fresh at fix time to re-validate the possibly-stale statusCheckRollup.
+type RunState struct {
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
+// fetchRunState returns the run's current status and conclusion. It uses the
+// REST API directly rather than `gh run view`, which resolves the run's
+// workflow and returns HTTP 404 when that workflow file has since been deleted.
+func fetchRunState(repo, runID string) (RunState, error) {
+	out, err := exec.Command(
+		"gh", "api",
+		fmt.Sprintf("repos/%s/actions/runs/%s", repo, runID),
+	).Output()
+	if err != nil {
+		return RunState{}, fmt.Errorf("gh api run %s: %w (stderr: %s)", runID, err, stderrOf(err))
+	}
+	var s RunState
+	if err := json.Unmarshal(out, &s); err != nil {
+		return RunState{}, fmt.Errorf("decode run state: %w", err)
+	}
+	return s, nil
+}
+
+// isGenuineCIFailure reports whether a run's current conclusion represents a
+// real, fixable failure — excluding cancellations, stale/superseded runs, and
+// successes from a later re-run attempt. Intentionally narrower than the
+// rollup-level classifier (hasFailingChecks), which keeps CANCELLED for the
+// conservative review-skip gate.
+func isGenuineCIFailure(conclusion string) bool {
+	switch strings.ToUpper(conclusion) {
+	case "FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED":
+		return true
+	}
+	return false
+}
+
 const maxFailedLogBytes = 50_000
 
 func fetchFailedRunLog(repo, runID string) (string, error) {
