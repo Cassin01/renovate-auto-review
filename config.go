@@ -50,7 +50,7 @@ func loadConfig(path string) (*Config, error) {
 		for _, k := range undecoded {
 			keys = append(keys, k.String())
 		}
-		fmt.Fprintf(os.Stderr, "warn: unknown keys in %s: %s\n", path, strings.Join(keys, ", "))
+		fmt.Fprintln(os.Stderr, serr.warn(fmt.Sprintf("warn: unknown keys in %s: %s", path, strings.Join(keys, ", "))))
 	}
 	cfg.SourcePath = path
 	applyConfigDefaults(&cfg)

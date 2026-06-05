@@ -13,7 +13,16 @@ import (
 
 const defaultMarker = "<!-- claude-auto-mergeable-check -->"
 
+// Painters for the orchestrator's own output, initialized once from the
+// streams' TTY state. The LLM stream is written uncolored via stream.go.
+var (
+	sout = newPainter(os.Stdout)
+	serr = newPainter(os.Stderr)
+)
+
 func main() {
+	log.SetOutput(&lineColorWriter{w: os.Stderr, code: ansiRed, enabled: colorEnabled(os.Stderr)})
+
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(),
 			"usage: %s [flags] <owner/name>\n\nflags:\n", os.Args[0])
@@ -25,7 +34,8 @@ func main() {
 
 	repo, err := parseRepoArg(flag.Args())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n\n", err)
+		fmt.Fprintln(os.Stderr, serr.failure(fmt.Sprintf("error: %v", err)))
+		fmt.Fprintln(os.Stderr)
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -42,15 +52,16 @@ func main() {
 	cfg, err := loadConfig(path)
 	if err != nil {
 		if nf, ok := errors.AsType[*configNotFoundError](err); ok {
-			fmt.Fprintf(os.Stderr, "error: %s\n\nplease create %s with the following template:\n\n%s\n",
-				err, nf.Path, sampleConfig)
+			fmt.Fprintln(os.Stderr, serr.failure(fmt.Sprintf("error: %s", err)))
+			fmt.Fprintf(os.Stderr, "\nplease create %s with the following template:\n\n%s\n",
+				nf.Path, sampleConfig)
 			os.Exit(1)
 		}
 		log.Fatalf("load config: %v", err)
 	}
 
 	if err := checkOwnerAllowed(repo, cfg.AllowedOwners); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintln(os.Stderr, serr.failure(fmt.Sprintf("error: %v", err)))
 		os.Exit(1)
 	}
 
@@ -88,20 +99,20 @@ func runAll(cfg *Config, repos []string, dryRun bool) error {
 		return fmt.Errorf("gh CLI not found in PATH: %w", err)
 	}
 
-	fmt.Fprintf(os.Stdout, "config: %s\nrepos: %d, limit: %d\n",
-		cfg.SourcePath, len(repos), cfg.Limit)
+	fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf("config: %s\nrepos: %d, limit: %d",
+		cfg.SourcePath, len(repos), cfg.Limit)))
 
 	var totalProcessed, totalSkipped, totalFailed int
 	for _, repo := range repos {
-		fmt.Fprintf(os.Stdout, "\n###### %s ######\n", repo)
+		fmt.Fprintf(os.Stdout, "\n%s\n", sout.header(fmt.Sprintf("###### %s ######", repo)))
 		p, s, f := processRepo(claudeBin, repo, defaultMarker, cfg, dryRun)
 		totalProcessed += p
 		totalSkipped += s
 		totalFailed += f
 	}
 
-	fmt.Fprintf(os.Stdout, "\n=== TOTAL: processed=%d / skipped=%d / errors=%d ===\n",
-		totalProcessed, totalSkipped, totalFailed)
+	fmt.Fprintf(os.Stdout, "\n%s\n", sout.header(fmt.Sprintf("=== TOTAL: processed=%d / skipped=%d / errors=%d ===",
+		totalProcessed, totalSkipped, totalFailed)))
 	if totalFailed > 0 {
 		os.Exit(1)
 	}
@@ -122,18 +133,18 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool) (proc
 		}
 	}
 
-	fmt.Fprintf(os.Stdout, "Open PRs: %d, Renovate PRs: %d\n", len(prs), len(targets))
+	fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf("Open PRs: %d, Renovate PRs: %d", len(prs), len(targets))))
 	for _, pr := range targets {
-		fmt.Fprintf(os.Stdout, "  - #%d  mergeable=%-9s  %s\n", pr.Number, pr.Mergeable, pr.Title)
+		fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf("  - #%d  mergeable=%-9s  %s", pr.Number, pr.Mergeable, pr.Title)))
 	}
 
 	if dryRun {
-		fmt.Fprintln(os.Stdout, "[dry-run] claude is not invoked.")
+		fmt.Fprintln(os.Stdout, sout.info("[dry-run] claude is not invoked."))
 		return 0, 0, 0
 	}
 
 	for _, pr := range targets {
-		fmt.Fprintf(os.Stdout, "\n=== %s PR #%d: %s ===\n", repo, pr.Number, pr.Title)
+		fmt.Fprintf(os.Stdout, "\n%s\n", sout.header(fmt.Sprintf("=== %s PR #%d: %s ===", repo, pr.Number, pr.Title)))
 
 		comments, commits, err := fetchPRReviewState(repo, pr.Number)
 		if err != nil {
@@ -152,13 +163,13 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool) (proc
 
 		switch {
 		case ciFailing:
-			fmt.Fprintln(os.Stdout, "review skip: CI is failing")
+			fmt.Fprintln(os.Stdout, sout.warn("review skip: CI is failing"))
 		case shouldSkipReview(comments, commits, marker):
-			fmt.Fprintln(os.Stdout, "review skip: marker present and no new commits since")
+			fmt.Fprintln(os.Stdout, sout.warn("review skip: marker present and no new commits since"))
 		default:
-			fmt.Fprintln(os.Stdout, "--- claude output ---")
+			fmt.Fprintln(os.Stdout, sout.delim("--- claude output ---"))
 			err := runClaudeAutoMode(claudeBin, repo, pr.Number, marker, cfg.CustomPrompt, os.Stdout)
-			fmt.Fprintln(os.Stdout, "--- end ---")
+			fmt.Fprintln(os.Stdout, sout.delim("--- end ---"))
 			if err != nil {
 				log.Printf("%s #%d: %v", repo, pr.Number, err)
 				failed++
@@ -222,13 +233,13 @@ func tryFixLockfileForPR(repo, marker string, cfg *Config, pr PR) (handled, ran 
 		return true, false, fmt.Errorf("mkdir workdir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(workDir) }()
-	fmt.Fprintf(os.Stdout, "lockfile-fix: ecosystem=%s workDir=%s files=%v\n", eco.name, workDir, files)
+	fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf("lockfile-fix: ecosystem=%s workDir=%s files=%v", eco.name, workDir, files)))
 
 	res, runErr := runLockfileFix(defaultCommandRunner, repo, marker, workDir, pr, eco)
 	if res != nil && res.VerifyOutput != "" {
-		fmt.Fprintln(os.Stdout, "--- lockfile verify output ---")
+		fmt.Fprintln(os.Stdout, sout.delim("--- lockfile verify output ---"))
 		fmt.Fprintln(os.Stdout, res.VerifyOutput)
-		fmt.Fprintln(os.Stdout, "--- end ---")
+		fmt.Fprintln(os.Stdout, sout.delim("--- end ---"))
 	}
 	switch {
 	case runErr != nil:
@@ -238,7 +249,7 @@ func tryFixLockfileForPR(repo, marker string, cfg *Config, pr PR) (handled, ran 
 	case res.NoDiff:
 		// A no-op regen means the CI failure is not a lockfile-drift
 		// problem. Delegate to Claude.
-		fmt.Fprintln(os.Stdout, "lockfile-fix: regen produced no diff; falling through to Claude")
+		fmt.Fprintln(os.Stdout, sout.warn("lockfile-fix: regen produced no diff; falling through to Claude"))
 		return false, false, nil
 	case res.Pushed:
 		return true, true, nil
@@ -257,13 +268,13 @@ func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR, checks []Check
 	for _, id := range runIDs {
 		log, err := fetchFailedRunLog(repo, id)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warn: fetch run %s log: %v\n", id, err)
+			fmt.Fprintln(os.Stderr, serr.warn(fmt.Sprintf("warn: fetch run %s log: %v", id, err)))
 			continue
 		}
 		fmt.Fprintf(&logs, "===== run %s =====\n%s\n", id, log)
 	}
 	if logs.Len() == 0 {
-		fmt.Fprintln(os.Stdout, "auto-fix: failing checks present but no Actions log available (e.g. renovate-side status). Skipping.")
+		fmt.Fprintln(os.Stdout, sout.warn("auto-fix: failing checks present but no Actions log available (e.g. renovate-side status). Skipping."))
 		return false, nil
 	}
 
@@ -272,24 +283,24 @@ func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR, checks []Check
 		return false, fmt.Errorf("mkdir workdir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(workDir) }()
-	fmt.Fprintf(os.Stdout, "auto-fix: workDir=%s, failing checks=%d\n", workDir, len(runIDs))
+	fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf("auto-fix: workDir=%s, failing checks=%d", workDir, len(runIDs))))
 
 	verifier := func(wd, lg string, env []string, w io.Writer) (verifyVerdict, error) {
 		return runClaudeVerify(claudeBin, repo, pr.Number, wd, lg, cfg.CustomPrompt, env, w)
 	}
 	publishRunner := newStrippedRunner(buildPublishEnv(os.Environ()))
 
-	fmt.Fprintln(os.Stdout, "--- claude verify output ---")
+	fmt.Fprintln(os.Stdout, sout.delim("--- claude verify output ---"))
 	res, err := runCIFix(publishRunner, verifier, repo, marker, workDir, pr, logs.String(), buildVerifyEnv(os.Environ()), os.Stdout)
-	fmt.Fprintln(os.Stdout, "--- end ---")
+	fmt.Fprintln(os.Stdout, sout.delim("--- end ---"))
 	if res != nil {
 		switch {
 		case res.Pushed:
-			fmt.Fprintln(os.Stdout, "auto-fix: fix pushed")
+			fmt.Fprintln(os.Stdout, sout.success("auto-fix: fix pushed"))
 		case res.Unfixable:
-			fmt.Fprintln(os.Stdout, "auto-fix: unfixable (no push)")
+			fmt.Fprintln(os.Stdout, sout.warn("auto-fix: unfixable (no push)"))
 		case res.NoChange:
-			fmt.Fprintln(os.Stdout, "auto-fix: no change produced (no push)")
+			fmt.Fprintln(os.Stdout, sout.warn("auto-fix: no change produced (no push)"))
 		}
 	}
 	return true, err
