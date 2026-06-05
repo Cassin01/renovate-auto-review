@@ -154,10 +154,13 @@ Behavior:
    an isolated working directory; it is removed on exit via `defer os.RemoveAll`
 4. The tool clones and checks out the PR branch, then runs a **verify** phase:
    Claude (in a scoped environment, with commit/push/comment tools disabled)
-   identifies the root cause, applies a minimal fix, and reproduces the failing
-   CI job locally using the project's own commands (discovered from
-   `.github/workflows`, `package.json`, `Makefile`, etc. — not assumed to be
-   Go). It writes a verdict to `rar-verify-result.json` and prints `VERIFY_DONE`
+   identifies the root cause, applies a minimal fix, and re-runs the failing
+   CI job's **full step sequence** locally using the project's own commands
+   (discovered from `.github/workflows`, `package.json`, `Makefile`, etc. — not
+   assumed to be Go). Because the failure log shows only the first failing step,
+   every step of the job is re-run — including the formatter/linter over edited
+   files — so a fix that breaks a previously-green step is caught before push.
+   It writes a verdict to `rar-verify-result.json` and prints `VERIFY_DONE`
 5. On a `fixed` verdict, the tool itself (not Claude) stages **tracked changes
    only**, scans the staged diff and comment body for secrets, then commits as
    `fix(ci): <summary> [claude-auto-fix]`, pushes, and posts the comment
@@ -170,8 +173,9 @@ The verify phase enforces:
 - Keep existing Renovate commits intact; add exactly one new commit on top
 - Only minor fixes are in scope (type fixes, test adjustments, lockfile
   regeneration); major breaking changes are out of scope
-- A green local run that mirrors the failed CI job is mandatory before the
-  verdict can be `fixed`
+- Every step of the failed CI job (not only the step that was red) must pass
+  locally — including the project's formatter/linter over edited files — before
+  the verdict can be `fixed`
 
 The verdict is `unfixable` (→ `❌` comment, **no push**) when:
 
