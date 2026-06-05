@@ -289,6 +289,33 @@ func TestPickFailedRunIDs(t *testing.T) {
 	}
 }
 
+func TestIsGenuineCIFailure(t *testing.T) {
+	cases := []struct {
+		conclusion string
+		want       bool
+	}{
+		{"FAILURE", true},
+		{"failure", true},
+		{"TIMED_OUT", true},
+		{"STARTUP_FAILURE", true},
+		{"ACTION_REQUIRED", true},
+		{"CANCELLED", false},
+		{"SUCCESS", false},
+		{"SKIPPED", false},
+		{"NEUTRAL", false},
+		{"STALE", false},
+		{"", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.conclusion, func(t *testing.T) {
+			if got := isGenuineCIFailure(tc.conclusion); got != tc.want {
+				t.Errorf("isGenuineCIFailure(%q): want %v, got %v", tc.conclusion, tc.want, got)
+			}
+		})
+	}
+}
+
 func TestHasAutoFixLabel(t *testing.T) {
 	cases := []struct {
 		name  string

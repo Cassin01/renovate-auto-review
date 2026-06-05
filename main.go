@@ -266,15 +266,30 @@ func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR, checks []Check
 	runIDs := pickFailedRunIDs(checks)
 	var logs strings.Builder
 	for _, id := range runIDs {
-		log, err := fetchFailedRunLog(repo, id)
+		// The rollup that produced runIDs can lag the run's actual state: a
+		// re-run may have since turned green, or the failure may be a
+		// cancellation rather than a fixable error. Re-validate before
+		// attempting a log fetch that would otherwise fail or fix nothing.
+		st, err := fetchRunState(repo, id)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, serr.warn(fmt.Sprintf("warn: run %s state lookup failed: %v; skipping", id, err)))
+			continue
+		}
+		if !strings.EqualFold(st.Status, "completed") || !isGenuineCIFailure(st.Conclusion) {
+			fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf(
+				"auto-fix: run %s not an actionable failure (status=%s conclusion=%s); skipping",
+				id, st.Status, st.Conclusion)))
+			continue
+		}
+		runLog, err := fetchFailedRunLog(repo, id)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, serr.warn(fmt.Sprintf("warn: fetch run %s log: %v", id, err)))
 			continue
 		}
-		fmt.Fprintf(&logs, "===== run %s =====\n%s\n", id, log)
+		fmt.Fprintf(&logs, "===== run %s =====\n%s\n", id, runLog)
 	}
 	if logs.Len() == 0 {
-		fmt.Fprintln(os.Stdout, sout.warn("auto-fix: failing checks present but no Actions log available (e.g. renovate-side status). Skipping."))
+		fmt.Fprintln(os.Stdout, sout.warn("auto-fix: no actionable failing Actions run (re-run succeeded, cancelled, or renovate-side status). Skipping."))
 		return false, nil
 	}
 
