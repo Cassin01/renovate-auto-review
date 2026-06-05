@@ -132,8 +132,8 @@ const verifyPromptTemplate = `Target: %s PR #%d (Renovate auto-update). The PR b
 ---
 %s
 ---
-2. Determine the project's actual lint/test/build commands from its CI config and manifests — do NOT assume Go. Inspect ` + "`.github/workflows`" + `, ` + "`package.json`" + ` scripts, ` + "`Makefile`" + `, or equivalent, and reproduce the failing job's commands locally
-3. Apply a minimal source fix, then re-run those same commands locally until every one passes. You MUST observe a green local run mirroring the failed CI job before declaring the fix verified
+2. Determine the project's actual lint/test/build commands from its CI config and manifests — do NOT assume Go. Inspect ` + "`.github/workflows`" + `, ` + "`package.json`" + ` scripts, ` + "`Makefile`" + `, or equivalent. The failure log above shows only the FIRST failing step (CI stops on first error), so enumerate EVERY step of the failing job in order — not just the one in the log — because earlier steps must still pass and later steps may also be broken
+3. Apply a minimal source fix, then re-run the failing job's full step sequence in order, and require every step to pass. A fix edit can break a previously-passing step — in particular, run the project's formatter and linter (e.g. ` + "`prettier --check`/`--write`" + `, ` + "`eslint`" + `, ` + "`stylelint`" + `, ` + "`gofmt`" + `) over the files you edited and leave them clean. You MUST observe every step of the failing job green locally before declaring the fix verified
 4. Write a JSON file ` + "`%s`" + ` in the working directory:
    {"verdict":"fixed|unfixable|nochange","summary":"<1-2 lines>","failing_checks":["..."],"suspected_cause":"<1-2 lines>"}
    - "fixed": the failing step now passes locally after your change

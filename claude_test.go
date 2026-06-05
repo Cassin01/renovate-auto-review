@@ -117,6 +117,8 @@ func TestBuildVerifyPrompt(t *testing.T) {
 				".npmrc",
 				"${NODE_AUTH_TOKEN}",
 				"performed by the calling tool",
+				"every step",
+				"formatter",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("expected substring %q not found", want)
