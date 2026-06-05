@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -273,8 +274,23 @@ func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR, checks []Check
 	defer func() { _ = os.RemoveAll(workDir) }()
 	fmt.Fprintf(os.Stdout, "auto-fix: workDir=%s, failing checks=%d\n", workDir, len(runIDs))
 
-	fmt.Fprintln(os.Stdout, "--- claude fix output ---")
-	err = runClaudeFixMode(claudeBin, repo, pr.Number, pr.HeadRefName, marker, workDir, logs.String(), cfg.CustomPrompt, os.Stdout)
+	verifier := func(wd, lg string, env []string, w io.Writer) (verifyVerdict, error) {
+		return runClaudeVerify(claudeBin, repo, pr.Number, wd, lg, cfg.CustomPrompt, env, w)
+	}
+	publishRunner := newStrippedRunner(buildPublishEnv(os.Environ()))
+
+	fmt.Fprintln(os.Stdout, "--- claude verify output ---")
+	res, err := runCIFix(publishRunner, verifier, repo, marker, workDir, pr, logs.String(), buildVerifyEnv(os.Environ()), os.Stdout)
 	fmt.Fprintln(os.Stdout, "--- end ---")
+	if res != nil {
+		switch {
+		case res.Pushed:
+			fmt.Fprintln(os.Stdout, "auto-fix: fix pushed")
+		case res.Unfixable:
+			fmt.Fprintln(os.Stdout, "auto-fix: unfixable (no push)")
+		case res.NoChange:
+			fmt.Fprintln(os.Stdout, "auto-fix: no change produced (no push)")
+		}
+	}
 	return true, err
 }

@@ -76,7 +76,7 @@ func TestRenderClaudeStream(t *testing.T) {
 			}
 
 			var out bytes.Buffer
-			got, err := renderClaudeStream(bytes.NewReader(data), &out)
+			got, err := renderClaudeStream(bytes.NewReader(data), &out, &redactor{})
 			if err != nil {
 				t.Fatalf("renderClaudeStream: unexpected error: %v", err)
 			}
@@ -95,5 +95,36 @@ func TestRenderClaudeStream(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRenderClaudeStreamRedactsSecrets(t *testing.T) {
+	t.Setenv("NODE_AUTH_TOKEN", "s3cr3t-literal-value")
+	data, err := os.ReadFile(filepath.Join("testdata", "claude_stream_secret.jsonl"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	var out bytes.Buffer
+	got, err := renderClaudeStream(bytes.NewReader(data), &out, newRedactor())
+	if err != nil {
+		t.Fatalf("renderClaudeStream: %v", err)
+	}
+	if !strings.Contains(got, "VERIFY_DONE") {
+		t.Errorf("detection text should retain VERIFY_DONE, got %q", got)
+	}
+
+	s := out.String()
+	for _, secret := range []string{
+		"ghp_AAAAAAAAAAAAAAAAAAAAAAAA",
+		"s3cr3t-literal-value",
+		"_authToken=s3cr3t-literal-value",
+	} {
+		if strings.Contains(s, secret) {
+			t.Errorf("output leaked secret %q:\n%s", secret, s)
+		}
+	}
+	if !strings.Contains(s, redactionPlaceholder) {
+		t.Errorf("output should contain %q:\n%s", redactionPlaceholder, s)
 	}
 }

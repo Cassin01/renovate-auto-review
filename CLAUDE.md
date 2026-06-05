@@ -28,10 +28,20 @@ cross-cutting code accumulate in `main.go`.
 * `main.go`     : CLI entry, flag parsing, orchestration loop over PRs
 * `config.go`   : TOML config loading, XDG paths, validation
 * `github.go`   : `gh` CLI wrappers (list/view PRs, status checks, logs, comments)
-* `claude.go`   : `claude` CLI invocation (review mode and auto-fix mode)
+* `claude.go`   : `claude` CLI invocation (review mode and verify mode), stream wiring
+* `stream.go`   : `claude` stream-json parsing → progress trace (redacted)
+* `cifix.go`    : token-safe CI auto-fix — verify/publish phase split, scoped/stripped env, secret scan
+* `redact.go`   : credential redaction for stdout + the pre-publish secret scan
+* `lockfile.go` : deterministic lockfile-only auto-fix path (no `claude`)
 * `*_test.go`   : Tests, colocated with the file under test
 * `testdata/`   : Fixtures (golden outputs, stubbed CLI responses)
 * `config.example.toml` : Template for `~/.config/renovate-auto-review/config.toml`
+
+The CI auto-fix flow is **phase-split for token safety**: a verify phase
+(`claude`, scoped env, cannot commit/push/comment) and a publish phase
+(tool-driven, registry-token env stripped, tracked-files-only staging,
+secret-scan abort). A private registry token is supplied via the environment
+only — never a config field. See `README.md` for the security model.
 
 ## External CLI Dependencies
 
