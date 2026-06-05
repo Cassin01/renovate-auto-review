@@ -151,37 +151,61 @@ Behavior:
    (tail-truncated to the last 50KB). If no run ID could be extracted,
    auto-fix is skipped without invoking Claude
 3. `os.MkdirTemp` (under `work_dir`, defaulting to `os.TempDir()`) creates
-   an isolated working directory passed to Claude via `cmd.Dir`; it is
-   removed on exit via `defer os.RemoveAll`
-4. Claude checks out the PR branch with `gh pr checkout`, identifies the
-   root cause, applies a minimal fix, then reproduces the failing CI job
-   locally using the project's own commands (discovered from
-   `.github/workflows`, `package.json`, `Makefile`, etc. — not assumed to
-   be Go) and confirms a green run before committing as
-   `fix(ci): <summary> [claude-auto-fix]` and pushing
-5. On completion, Claude prints `PUSHED` (push + comment) or `POSTED`
-   (comment-only) on the final line
+   an isolated working directory; it is removed on exit via `defer os.RemoveAll`
+4. The tool clones and checks out the PR branch, then runs a **verify** phase:
+   Claude (in a scoped environment, with commit/push/comment tools disabled)
+   identifies the root cause, applies a minimal fix, and reproduces the failing
+   CI job locally using the project's own commands (discovered from
+   `.github/workflows`, `package.json`, `Makefile`, etc. — not assumed to be
+   Go). It writes a verdict to `rar-verify-result.json` and prints `VERIFY_DONE`
+5. On a `fixed` verdict, the tool itself (not Claude) stages **tracked changes
+   only**, scans the staged diff and comment body for secrets, then commits as
+   `fix(ci): <summary> [claude-auto-fix]`, pushes, and posts the comment
 
-The fix prompt enforces:
+The verify phase enforces:
 
 - No `git commit --amend` / `git rebase` / `git reset --hard` /
   `git push --force` / `git push --force-with-lease`
-- No `gh pr edit` (never touch the rebase checkbox in the PR body)
+- No `gh pr edit`; commit/push/comment are disabled (the tool performs them)
 - Keep existing Renovate commits intact; add exactly one new commit on top
 - Only minor fixes are in scope (type fixes, test adjustments, lockfile
   regeneration); major breaking changes are out of scope
-- No push without a green local lint/test/build run that mirrors the failed
-  CI job — verification is part of the fix and cannot be skipped
+- A green local run that mirrors the failed CI job is mandatory before the
+  verdict can be `fixed`
 
-The prompt falls back to a `❌ unfixable` comment **without pushing** when:
+The verdict is `unfixable` (→ `❌` comment, **no push**) when:
 
 - A major breaking change would be required (e.g. an API-incompatible upgrade)
-- A lockfile regeneration alone cannot make the tests pass
 - The fix would require API keys, secrets, or external network access
 - The project's lint/test/build cannot be run locally at all (e.g. deps
-  cannot be installed, or verification needs secrets / network / a live
-  endpoint) — an unverifiable fix is never pushed
+  cannot be installed) — an unverifiable fix is never pushed
 - Build or test still fails after 3 attempts
+
+### Private dependency registries (token-safe)
+
+Some target repos need a private registry token to install dependencies (e.g.
+`@scope/*` packages on GitHub Packages). Provide it **via the environment only**
+— export it in your shell before running; the tool never stores it and adds no
+config field for it:
+
+```sh
+export NODE_AUTH_TOKEN=...   # or NPM_TOKEN / NPM_CONFIG_* / YARN_* / PNPM_*
+```
+
+The target repo's committed `.npmrc` must use `${NODE_AUTH_TOKEN}` indirection
+(never a literal). Because `renovate-auto-review` is a public tool, the token is
+kept from leaking by two layers:
+
+1. **Structural.** The flow is split into a *verify* phase and a *publish*
+   phase. Verify receives a scoped allowlist of env vars (tooling baseline +
+   `gh`/Anthropic vars + the registry-token vars) so `npm ci` works, but it
+   cannot commit/push/comment. Publish runs with the registry-token vars
+   **stripped**, never invokes a package manager, stages **tracked files only**
+   (an accidental literal-token `.npmrc` is untracked and excluded), and aborts
+   before commit/push if a secret pattern is found in the staged diff or comment.
+2. **Redaction (defense-in-depth).** All subprocess stdout/stderr is passed
+   through a redactor that scrubs credential-shaped strings and the runtime
+   values of the known token env vars before anything is printed.
 
 ### Caveat: pushing to a Renovate branch
 

@@ -27,10 +27,11 @@ type streamEvent struct {
 
 // renderClaudeStream consumes Claude stream-json (JSONL) from r, writes a
 // human-readable progress trace to w as events arrive, and returns the text
-// used for POSTED/PUSHED detection (the final result event, or the
-// concatenated assistant text when no result event is present). Blank lines
-// and lines that are not valid JSON events are skipped.
-func renderClaudeStream(r io.Reader, w io.Writer) (string, error) {
+// used for POSTED/PUSHED/VERIFY_DONE detection (the final result event, or the
+// concatenated assistant text when no result event is present). Every printed
+// line is passed through red so credentials never reach w. Blank lines and
+// lines that are not valid JSON events are skipped.
+func renderClaudeStream(r io.Reader, w io.Writer, red *redactor) (string, error) {
 	br := bufio.NewReader(r)
 	var result, assistant strings.Builder
 
@@ -39,7 +40,7 @@ func renderClaudeStream(r io.Reader, w io.Writer) (string, error) {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			var ev streamEvent
 			if json.Unmarshal([]byte(trimmed), &ev) == nil {
-				renderEvent(ev, w, &result, &assistant)
+				renderEvent(ev, w, red, &result, &assistant)
 			}
 		}
 		if readErr != nil {
@@ -52,25 +53,25 @@ func renderClaudeStream(r io.Reader, w io.Writer) (string, error) {
 	return detectionText(&result, &assistant), nil
 }
 
-func renderEvent(ev streamEvent, w io.Writer, result, assistant *strings.Builder) {
+func renderEvent(ev streamEvent, w io.Writer, red *redactor, result, assistant *strings.Builder) {
 	switch ev.Type {
 	case "assistant":
 		for _, c := range ev.Message.Content {
 			switch c.Type {
 			case "text":
 				if c.Text != "" {
-					fmt.Fprintln(w, c.Text)
+					fmt.Fprintln(w, red.line(c.Text))
 					assistant.WriteString(c.Text)
 					assistant.WriteByte('\n')
 				}
 			case "tool_use":
-				fmt.Fprintln(w, formatToolUse(c.Name, c.Input))
+				fmt.Fprintln(w, formatToolUse(c.Name, c.Input, red))
 			}
 		}
 	case "user":
 		for _, c := range ev.Message.Content {
 			if c.Type == "tool_result" {
-				fmt.Fprintf(w, "← %s\n", truncate(extractToolResultText(c.Content)))
+				fmt.Fprintf(w, "← %s\n", truncate(red.line(extractToolResultText(c.Content))))
 			}
 		}
 	case "result":
@@ -88,20 +89,20 @@ func detectionText(result, assistant *strings.Builder) string {
 // formatToolUse renders a tool invocation as a single progress line. Bash
 // commands are shown verbatim (prefixed with "$ "); other tools show the name
 // and a compact view of their input.
-func formatToolUse(name string, input json.RawMessage) string {
+func formatToolUse(name string, input json.RawMessage, red *redactor) string {
 	if name == "Bash" {
 		var b struct {
 			Command string `json:"command"`
 		}
 		if err := json.Unmarshal(input, &b); err == nil && b.Command != "" {
-			return "$ " + truncate(b.Command)
+			return "$ " + truncate(red.line(b.Command))
 		}
 	}
 	compact := strings.TrimSpace(string(input))
 	if compact == "" || compact == "null" {
 		return "→ " + name
 	}
-	return "→ " + name + " " + truncate(compact)
+	return "→ " + name + " " + truncate(red.line(compact))
 }
 
 // extractToolResultText pulls the textual content out of a tool_result block,

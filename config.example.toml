@@ -15,3 +15,8 @@ limit = 50
 # Matched case-insensitively against the "owner" part of the "owner/name"
 # argument. Empty or unset = guard disabled (any owner allowed).
 # allowed_owners = ["Cassin01", "my-org"]
+
+# Private dependency registries: there is no config key for tokens by design.
+# Export the token in your shell before running (e.g. NODE_AUTH_TOKEN / NPM_TOKEN
+# / NPM_CONFIG_*). It is forwarded only to the verification phase and stripped
+# before commit/push. The target repo's .npmrc must use ${NODE_AUTH_TOKEN}.

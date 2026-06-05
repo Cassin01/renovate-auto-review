@@ -87,51 +87,47 @@ func TestBuildPromptWithCustomPrompt(t *testing.T) {
 	}
 }
 
-func TestBuildFixPrompt(t *testing.T) {
+func TestBuildVerifyPrompt(t *testing.T) {
 	cases := []struct {
 		name     string
 		repo     string
 		prNumber int
-		headRef  string
-		marker   string
 		workDir  string
 		logs     string
 	}{
-		{
-			name: "typical", repo: "owner/repo", prNumber: 42,
-			headRef: "renovate/foo", marker: "<!-- m -->",
-			workDir: "/tmp/rar-42-abc", logs: "error: something broke",
-		},
-		{
-			name: "empty logs", repo: "o/r", prNumber: 1,
-			headRef: "renovate/bar", marker: "<!-- claude-auto-mergeable-check -->",
-			workDir: "/tmp/x", logs: "",
-		},
-		{
-			name: "large pr number", repo: "x/y", prNumber: 99999,
-			headRef: "renovate/baz", marker: "M",
-			workDir: "/var/tmp/rar", logs: strings.Repeat("a", 1000),
-		},
+		{name: "typical", repo: "owner/repo", prNumber: 42, workDir: "/tmp/rar-42-abc", logs: "error: something broke"},
+		{name: "empty logs", repo: "o/r", prNumber: 1, workDir: "/tmp/x", logs: ""},
+		{name: "large pr number", repo: "x/y", prNumber: 99999, workDir: "/var/tmp/rar", logs: strings.Repeat("a", 1000)},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildFixPrompt(tc.repo, tc.prNumber, tc.headRef, tc.marker, tc.workDir, tc.logs, "")
+			got := buildVerifyPrompt(tc.repo, tc.prNumber, tc.workDir, tc.logs, "")
 
 			for _, want := range []string{
-				tc.repo, tc.headRef, tc.marker, tc.workDir,
+				tc.repo, tc.workDir,
 				strconv.Itoa(tc.prNumber),
 				"Hard rules",
 				"amend",
 				"force",
-				"rebase checkbox",
 				"Fallback",
-				"PUSHED",
-				"POSTED",
-				"github.com/Cassin01/renovate-auto-review",
+				".github/workflows", "package.json", "Makefile",
+				"VERIFY_DONE",
+				verifyResultFile,
+				".npmrc",
+				"${NODE_AUTH_TOKEN}",
+				"performed by the calling tool",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("expected substring %q not found", want)
+				}
+			}
+
+			// The verify subprocess must not be told to publish, and the old
+			// push/post protocol must be gone.
+			for _, bad := range []string{"PUSHED", "POSTED", "go build ./...", "go test ./..."} {
+				if strings.Contains(got, bad) {
+					t.Errorf("unexpected substring %q present", bad)
 				}
 			}
 
@@ -152,41 +148,7 @@ func TestBuildFixPrompt(t *testing.T) {
 	}
 }
 
-func TestBuildFixPromptVerificationGate(t *testing.T) {
-	got := buildFixPrompt("owner/repo", 7, "renovate/x", "<!-- m -->", "/tmp/w", "error", "")
-
-	t.Run("project-agnostic command discovery", func(t *testing.T) {
-		for _, want := range []string{".github/workflows", "package.json", "Makefile"} {
-			if !strings.Contains(got, want) {
-				t.Errorf("expected command-discovery hint %q, not found", want)
-			}
-		}
-	})
-
-	t.Run("no go-specific verification example", func(t *testing.T) {
-		for _, bad := range []string{"go build ./...", "go test ./..."} {
-			if strings.Contains(got, bad) {
-				t.Errorf("Go-specific example %q should be removed", bad)
-			}
-		}
-	})
-
-	t.Run("mandatory green local run before push", func(t *testing.T) {
-		for _, want := range []string{"pass", "before pushing"} {
-			if !strings.Contains(got, want) {
-				t.Errorf("expected mandatory-verification phrase %q, not found", want)
-			}
-		}
-	})
-
-	t.Run("fallback covers unverifiable projects", func(t *testing.T) {
-		if !strings.Contains(got, "cannot be run locally") {
-			t.Errorf("expected fallback for projects that cannot be verified locally")
-		}
-	})
-}
-
-func TestBuildFixPromptWithCustomPrompt(t *testing.T) {
+func TestBuildVerifyPromptWithCustomPrompt(t *testing.T) {
 	cases := []struct {
 		name   string
 		custom string
@@ -197,7 +159,7 @@ func TestBuildFixPromptWithCustomPrompt(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildFixPrompt("owner/repo", 1, "renovate/x", "<!-- m -->", "/tmp/w", "log excerpt", tc.custom)
+			got := buildVerifyPrompt("owner/repo", 1, "/tmp/w", "log excerpt", tc.custom)
 
 			if c := strings.Count(got, "[Additional instructions]"); c != 1 {
 				t.Errorf("section header should appear once, got %d", c)
@@ -205,7 +167,7 @@ func TestBuildFixPromptWithCustomPrompt(t *testing.T) {
 			if !strings.Contains(got, tc.custom) {
 				t.Errorf("custom prompt %q not embedded verbatim", tc.custom)
 			}
-			for _, want := range []string{"[Output protocol]", "PUSHED", "POSTED", "Hard rules"} {
+			for _, want := range []string{"[Output protocol]", "VERIFY_DONE", "Hard rules"} {
 				if !strings.Contains(got, want) {
 					t.Errorf("invariant substring %q missing", want)
 				}
