@@ -116,5 +116,5 @@ writing tests that describe expected behavior *before* implementation.
 
 ## Git Conventions
 
-* **Commit Messages**: English. Conventional-Commits-style prefixes are used in this repo (`feat:`, `feat!:`, `fix:`, `docs:`, `refactor:` …).
-* **PR Titles/Descriptions**: English.
+* **Language**: Commit messages and pull request titles, descriptions, and bodies MUST be written in English.
+* **Commit Messages**: Conventional-Commits-style prefixes are used in this repo (`feat:`, `feat!:`, `fix:`, `docs:`, `refactor:` …).
