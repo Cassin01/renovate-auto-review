@@ -30,11 +30,19 @@ func main() {
 	}
 	cfgPath := flag.String("config", "", "path to config.toml (default: $XDG_CONFIG_HOME/renovate-auto-review/config.toml)")
 	dryRun := flag.Bool("dry-run", false, "list target Renovate PRs but do not invoke claude")
+	prNum := flag.Int("pr", 0, "review only this PR number (default: all open Renovate PRs)")
 	flag.Parse()
 
 	repo, err := parseRepoArg(flag.Args())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, serr.failure(fmt.Sprintf("error: %v", err)))
+		fmt.Fprintln(os.Stderr)
+		flag.Usage()
+		os.Exit(2)
+	}
+
+	if *prNum < 0 {
+		fmt.Fprintln(os.Stderr, serr.failure(fmt.Sprintf("error: -pr must be a positive PR number, got %d", *prNum)))
 		fmt.Fprintln(os.Stderr)
 		flag.Usage()
 		os.Exit(2)
@@ -65,7 +73,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := runAll(cfg, []string{repo}, *dryRun); err != nil {
+	if err := runAll(cfg, []string{repo}, *dryRun, *prNum); err != nil {
 		log.Fatalf("fatal: %v", err)
 	}
 }
@@ -86,7 +94,7 @@ func parseRepoArg(args []string) (string, error) {
 	return r, nil
 }
 
-func runAll(cfg *Config, repos []string, dryRun bool) error {
+func runAll(cfg *Config, repos []string, dryRun bool, prNumber int) error {
 	var claudeBin string
 	if !dryRun {
 		bin, err := exec.LookPath("claude")
@@ -105,7 +113,7 @@ func runAll(cfg *Config, repos []string, dryRun bool) error {
 	var totalProcessed, totalSkipped, totalFailed int
 	for _, repo := range repos {
 		fmt.Fprintf(os.Stdout, "\n%s\n", sout.header(fmt.Sprintf("###### %s ######", repo)))
-		p, s, f := processRepo(claudeBin, repo, defaultMarker, cfg, dryRun)
+		p, s, f := processRepo(claudeBin, repo, defaultMarker, cfg, dryRun, prNumber)
 		totalProcessed += p
 		totalSkipped += s
 		totalFailed += f
@@ -119,11 +127,22 @@ func runAll(cfg *Config, repos []string, dryRun bool) error {
 	return nil
 }
 
-func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool) (processed, skipped, failed int) {
-	prs, err := listOpenPRs(repo, cfg.Limit)
-	if err != nil {
-		log.Printf("%s: list PRs: %v", repo, err)
-		return 0, 0, 1
+func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool, prNumber int) (processed, skipped, failed int) {
+	var prs []PR
+	if prNumber > 0 {
+		pr, err := fetchPR(repo, prNumber)
+		if err != nil {
+			log.Printf("%s: fetch PR #%d: %v", repo, prNumber, err)
+			return 0, 0, 1
+		}
+		prs = []PR{pr}
+	} else {
+		listed, err := listOpenPRs(repo, cfg.Limit)
+		if err != nil {
+			log.Printf("%s: list PRs: %v", repo, err)
+			return 0, 0, 1
+		}
+		prs = listed
 	}
 
 	var targets []PR
@@ -133,7 +152,14 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool) (proc
 		}
 	}
 
-	fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf("Open PRs: %d, Renovate PRs: %d", len(prs), len(targets))))
+	if prNumber > 0 {
+		fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf("Target PR #%d: renovate=%t", prNumber, len(targets) > 0)))
+		if len(targets) == 0 {
+			fmt.Fprintln(os.Stdout, sout.warn(fmt.Sprintf("#%d is not a Renovate PR; skipping", prNumber)))
+		}
+	} else {
+		fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf("Open PRs: %d, Renovate PRs: %d", len(prs), len(targets))))
+	}
 	for _, pr := range targets {
 		fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf("  - #%d  mergeable=%-9s  %s", pr.Number, pr.Mergeable, pr.Title)))
 	}

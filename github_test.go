@@ -437,6 +437,58 @@ func TestDecodePRFiles(t *testing.T) {
 	}
 }
 
+func TestDecodePR(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		want    PR
+		wantErr bool
+	}{
+		{
+			name: "renovate PR object",
+			raw: `{"number":42,"title":"Update go.mod","author":{"is_bot":true,"login":"app/renovate"},` +
+				`"labels":[{"name":"renovate"}],"mergeable":"MERGEABLE","headRefName":"renovate/go","url":"https://x/42"}`,
+			want: PR{
+				Number:      42,
+				Title:       "Update go.mod",
+				Author:      Author{IsBot: true, Login: renovateLogin},
+				Labels:      []Label{{Name: renovateLabel}},
+				Mergeable:   "MERGEABLE",
+				HeadRefName: "renovate/go",
+				URL:         "https://x/42",
+			},
+		},
+		{
+			name:    "malformed json",
+			raw:     `not json`,
+			wantErr: true,
+		},
+		{
+			name:    "array instead of object is an error",
+			raw:     `[{"number":1}]`,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := decodePR([]byte(tc.raw))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decodePR: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("decodePR() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStderrOf(t *testing.T) {
 	cases := []struct {
 		name string

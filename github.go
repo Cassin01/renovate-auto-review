@@ -60,6 +60,29 @@ func listOpenPRs(repo string, limit int) ([]PR, error) {
 	return prs, nil
 }
 
+// fetchPR fetches a single PR by number, returning the same fields as
+// listOpenPRs. Used when the caller targets one specific PR via -pr, bypassing
+// the cfg.Limit page size that bounds listOpenPRs.
+func fetchPR(repo string, prNumber int) (PR, error) {
+	out, err := exec.Command(
+		"gh", "pr", "view", strconv.Itoa(prNumber),
+		"--repo", repo,
+		"--json", "number,title,author,labels,mergeable,headRefName,url",
+	).Output()
+	if err != nil {
+		return PR{}, fmt.Errorf("gh pr view %d: %w (stderr: %s)", prNumber, err, stderrOf(err))
+	}
+	return decodePR(out)
+}
+
+func decodePR(raw []byte) (PR, error) {
+	var pr PR
+	if err := json.Unmarshal(raw, &pr); err != nil {
+		return PR{}, fmt.Errorf("decode pr view: %w", err)
+	}
+	return pr, nil
+}
+
 func isRenovatePR(pr PR) bool {
 	if !pr.Author.IsBot || pr.Author.Login != renovateLogin {
 		return false
