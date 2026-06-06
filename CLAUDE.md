@@ -102,7 +102,11 @@ writing tests that describe expected behavior *before* implementation.
 * **Race Detector**: Mandatory — `-race` is enforced by CI.
 * **Coverage Checklist**:
   * All exported functions have tests.
-  * Edge cases tested (nil, empty input, invalid input, missing config).
+  * Cover four value ranges per function, not just the happy path:
+    * **Normal**: typical valid input (e.g. a well-formed Renovate PR JSON object).
+    * **Boundary**: empty / min / max edges — `{}`, empty slices, off-by-one, the `-pr 0` (unset) vs `-pr 1` threshold.
+    * **Abnormal**: invalid / error-producing input — malformed JSON, wrong shape, missing config.
+    * **Extreme**: empty input, oversized numbers (e.g. max int32 PR number), very large logs.
   * Error paths exercised (not just the happy path).
 
 ## Anti-Patterns

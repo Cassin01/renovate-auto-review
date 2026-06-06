@@ -459,6 +459,21 @@ func TestDecodePR(t *testing.T) {
 			},
 		},
 		{
+			name: "empty object decodes to zero-value PR",
+			raw:  `{}`,
+			want: PR{},
+		},
+		{
+			name: "empty labels array stays non-nil empty slice",
+			raw:  `{"number":7,"labels":[]}`,
+			want: PR{Number: 7, Labels: []Label{}},
+		},
+		{
+			name: "max int32 PR number",
+			raw:  `{"number":2147483647}`,
+			want: PR{Number: 2147483647},
+		},
+		{
 			name:    "malformed json",
 			raw:     `not json`,
 			wantErr: true,
@@ -466,6 +481,11 @@ func TestDecodePR(t *testing.T) {
 		{
 			name:    "array instead of object is an error",
 			raw:     `[{"number":1}]`,
+			wantErr: true,
+		},
+		{
+			name:    "empty input is an error",
+			raw:     ``,
 			wantErr: true,
 		},
 	}
