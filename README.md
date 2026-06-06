@@ -86,9 +86,15 @@ go run . -dry-run Cassin01/multi_agent_control_tower
 # Real run: post comments on Renovate PRs (skipping those that already have a Claude comment)
 go run . Cassin01/multi_agent_control_tower
 
+# Review only a single PR by number (skips all other open Renovate PRs)
+go run . -pr 42 Cassin01/multi_agent_control_tower
+
 # Use a different config path
 go run . -config /path/to/other.toml Cassin01/multi_agent_control_tower
 ```
+
+By default every open Renovate PR is processed. Pass `-pr <number>` to target a
+single PR; if that PR is not a Renovate PR it is skipped.
 
 ## Flags
 
@@ -96,6 +102,7 @@ go run . -config /path/to/other.toml Cassin01/multi_agent_control_tower
 |-------------|-----------------------------------------------------|----------------------------|
 | `-config`   | `$XDG_CONFIG_HOME/renovate-auto-review/config.toml` | Path to the config file    |
 | `-dry-run`  | `false`                                             | Only list target PRs       |
+| `-pr`       | `0` (all)                                           | Review only this PR number |
 
 > **BREAKING**: The target repository is now passed as a positional CLI
 > argument (`<owner/name>`); the previous `repos` key in `config.toml` is no
