@@ -7,6 +7,15 @@
 # Value passed to "gh pr list --limit" (optional)
 limit = 50
 
+# Hand conflicting Renovate PRs back to Renovate by attaching the rebase label
+# so Renovate rebases/regenerates the branch (default false). Independent of
+# auto_fix_ci. The tool — not Claude — attaches the label.
+# auto_rebase_conflicts = false
+
+# Label that triggers a Renovate rebase; must match Renovate's "rebaseLabel"
+# (default "rebase").
+# rebase_label = "rebase"
+
 # Optional: appended to every Claude prompt as "[Additional instructions]".
 # Use to override output language, tone, or add project-specific constraints.
 # custom_prompt = "Write the PR comment body in Japanese."
