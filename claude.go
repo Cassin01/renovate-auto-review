@@ -135,10 +135,11 @@ const verifyPromptTemplate = `Target: %s PR #%d (Renovate auto-update). The PR b
 2. Determine the project's actual lint/test/build commands from its CI config and manifests — do NOT assume Go. Inspect ` + "`.github/workflows`" + `, ` + "`package.json`" + ` scripts, ` + "`Makefile`" + `, or equivalent. The failure log above shows only the FIRST failing step (CI stops on first error), so enumerate EVERY step of the failing job in order — not just the one in the log — because earlier steps must still pass and later steps may also be broken
 3. Apply a minimal source fix, then re-run the failing job's full step sequence in order, and require every step to pass. A fix edit can break a previously-passing step — in particular, run the project's formatter and linter (e.g. ` + "`prettier --check`/`--write`" + `, ` + "`eslint`" + `, ` + "`stylelint`" + `, ` + "`gofmt`" + `) over the files you edited and leave them clean. You MUST observe every step of the failing job green locally before declaring the fix verified
 4. Write a JSON file ` + "`%s`" + ` in the working directory:
-   {"verdict":"fixed|unfixable|nochange","summary":"<1-2 lines>","failing_checks":["..."],"suspected_cause":"<1-2 lines>"}
+   {"verdict":"fixed|unfixable|nochange","summary":"<1-2 lines>","failing_checks":["..."],"suspected_cause":"<1-2 lines>","verified_commands":["<cmd>", "..."]}
    - "fixed": the failing step now passes locally after your change
    - "nochange": no source change was needed
    - "unfixable": see Fallback below
+   - "verified_commands" (REQUIRED when verdict is "fixed"): the exact shell commands you ran and observed exit 0, in execution order. The calling tool re-runs each independently and will refuse to publish unless all pass, so each MUST be self-contained and re-runnable from the working directory with no extra setup — embed any required env inline (e.g. ` + "`GRAPHQL_ENDPOINT=https://... npm run build`" + `). Record only read-only lint/build/test commands; never a ` + "`git`" + ` or ` + "`gh`" + ` write
 
 [Fallback — set verdict "unfixable"]
 - A major breaking change is required (e.g. an API-incompatible library upgrade)

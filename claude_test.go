@@ -119,6 +119,8 @@ func TestBuildVerifyPrompt(t *testing.T) {
 				"performed by the calling tool",
 				"every step",
 				"formatter",
+				"verified_commands",
+				"re-runs each independently",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("expected substring %q not found", want)
