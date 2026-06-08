@@ -167,9 +167,13 @@ Behavior:
    assumed to be Go). Because the failure log shows only the first failing step,
    every step of the job is re-run — including the formatter/linter over edited
    files — so a fix that breaks a previously-green step is caught before push.
-   It writes a verdict to `rar-verify-result.json` and prints `VERIFY_DONE`
-5. On a `fixed` verdict, the tool itself (not Claude) stages **tracked changes
-   only**, scans the staged diff and comment body for secrets, then commits as
+   It writes a verdict to `rar-verify-result.json` — including the exact
+   `verified_commands` it ran and observed green — and prints `VERIFY_DONE`
+5. On a `fixed` verdict, the tool **re-runs each `verified_commands` entry
+   itself** (same scoped verify env, so lint/build/test reproduce what Claude
+   saw) and refuses to publish unless all pass — turning the self-reported
+   verdict into a machine-checked gate. It then stages **tracked changes only**,
+   scans the staged diff and comment body for secrets, then commits as
    `fix(ci): <summary> [claude-auto-fix]`, pushes, and posts the comment
 
 The verify phase enforces:
@@ -183,6 +187,11 @@ The verify phase enforces:
 - Every step of the failed CI job (not only the step that was red) must pass
   locally — including the project's formatter/linter over edited files — before
   the verdict can be `fixed`
+- A `fixed` verdict must list the exact `verified_commands` it ran; the tool
+  re-runs them independently before pushing and aborts (→ `❌` comment, **no
+  push**) if any fails, is missing, or embeds a `git`/`gh` write verb. A command
+  that cannot be reproduced tool-side (e.g. needs unavailable network) fails the
+  gate — an unverified fix is never pushed
 
 The verdict is `unfixable` (→ `❌` comment, **no push**) when:
 
@@ -210,10 +219,14 @@ kept from leaking by two layers:
 1. **Structural.** The flow is split into a *verify* phase and a *publish*
    phase. Verify receives a scoped allowlist of env vars (tooling baseline +
    `gh`/Anthropic vars + the registry-token vars) so `npm ci` works, but it
-   cannot commit/push/comment. Publish runs with the registry-token vars
-   **stripped**, never invokes a package manager, stages **tracked files only**
-   (an accidental literal-token `.npmrc` is untracked and excluded), and aborts
-   before commit/push if a secret pattern is found in the staged diff or comment.
+   cannot commit/push/comment. The publish-time **re-verification** of
+   `verified_commands` reuses the same scoped env (token present) but only
+   re-runs read-only lint/build/test — `git`/`gh` write verbs are rejected
+   before execution, so the token never reaches a publish operation through it.
+   Publish itself runs with the registry-token vars **stripped**, never invokes
+   a package manager, stages **tracked files only** (an accidental literal-token
+   `.npmrc` is untracked and excluded), and aborts before commit/push if a
+   secret pattern is found in the staged diff or comment.
 2. **Redaction (defense-in-depth).** All subprocess stdout/stderr is passed
    through a redactor that scrubs credential-shaped strings and the runtime
    values of the known token env vars before anything is printed.

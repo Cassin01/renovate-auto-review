@@ -119,11 +119,17 @@ func newStrippedRunner(env []string) commandRunner {
 
 // verifyVerdict is the structured result the verify subprocess writes to
 // rar-verify-result.json. Verdict is one of fixed | unfixable | nochange.
+//
+// VerifiedCommands are the exact shell commands the verify phase reports it ran
+// and observed green. The publish phase re-runs each independently and refuses
+// to push unless all pass, turning the self-reported "fixed" verdict into a
+// machine-checked gate.
 type verifyVerdict struct {
-	Verdict        string   `json:"verdict"`
-	Summary        string   `json:"summary"`
-	FailingChecks  []string `json:"failing_checks"`
-	SuspectedCause string   `json:"suspected_cause"`
+	Verdict          string   `json:"verdict"`
+	Summary          string   `json:"summary"`
+	FailingChecks    []string `json:"failing_checks"`
+	SuspectedCause   string   `json:"suspected_cause"`
+	VerifiedCommands []string `json:"verified_commands"`
 }
 
 // claudeVerifier is the seam for the verify subprocess. Tests inject a fake.
@@ -141,13 +147,18 @@ type ciFixResult struct {
 //
 //	Phase 0 (tool):    clone + checkout the PR branch.
 //	Phase 1 (claude):  verify in a scoped env that cannot commit/push/comment.
+//	Phase 1.5 (tool):  independently re-run the commands the verify phase
+//	                   reported green; abort the publish unless all pass.
 //	Phase 2 (tool):    stage tracked changes only, scan for secrets, then
 //	                   commit/push/comment under a token-stripped runner.
 //
-// run is the publish runner (token-stripped). verifyEnv is the scoped env for
-// the verify subprocess. A push only happens for a "fixed" verdict with a
-// secret-free staged diff.
-func runCIFix(run commandRunner, verify claudeVerifier, repo, marker, workDir string, pr PR, logs string, verifyEnv []string, out io.Writer) (*ciFixResult, error) {
+// run is the publish runner (token-stripped). reverify runs the re-verification
+// commands with the scoped verify env (registry token present, like Phase 1) so
+// lint/build/test reproduce what claude observed; it never performs git/gh
+// writes. verifyEnv is the scoped env for the verify subprocess. A push only
+// happens for a "fixed" verdict whose reported commands all re-run green and
+// whose staged diff is secret-free.
+func runCIFix(run, reverify commandRunner, verify claudeVerifier, repo, marker, workDir string, pr PR, logs string, verifyEnv []string, out io.Writer) (*ciFixResult, error) {
 	res := &ciFixResult{}
 
 	if o, err := run(workDir, "gh", "repo", "clone", repo, "."); err != nil {
@@ -175,6 +186,16 @@ func runCIFix(run commandRunner, verify claudeVerifier, repo, marker, workDir st
 		}
 		body := buildCIFixCommentBody(marker, verdict)
 		return res, postCommentViaFile(run, workDir, repo, pr.Number, body)
+	}
+
+	if failedCmd, rerr := reverifyCommands(reverify, workDir, verdict.VerifiedCommands); rerr != nil {
+		red := newRedactor()
+		body := buildReverifyAbortCommentBody(marker, failedCmd)
+		if hits := scanForSecrets(red, body); len(hits) > 0 {
+			body = buildSecretAbortCommentBody(marker, hits)
+		}
+		_ = postCommentViaFile(run, workDir, repo, pr.Number, body)
+		return res, fmt.Errorf("re-verification gate: %w", rerr)
 	}
 
 	statusOut, err := run(workDir, "git", "status", "--porcelain")
@@ -247,6 +268,52 @@ func trackedModifiedPaths(porcelain string) []string {
 	return paths
 }
 
+// publishVerbPatterns are subcommand signatures that mutate the remote or the
+// commit graph. A re-verification command must be a read-only re-run
+// (lint/build/test), so any match is rejected before execution — the
+// reverify runner carries the registry token, and these must never reach it.
+var publishVerbPatterns = []string{
+	"git add", "git commit", "git push", "git rebase", "git reset",
+	"git merge", "git cherry-pick", "git tag", "git fetch", "git pull",
+	"gh pr comment", "gh pr edit", "gh pr merge", "gh release", "gh api",
+}
+
+// containsPublishVerb reports whether a shell command embeds a write verb. It
+// normalizes interior whitespace so `git  commit` matches; it is defense in
+// depth, not the primary boundary (the verify subprocess already runs under an
+// allowlist that omits these verbs).
+func containsPublishVerb(cmd string) bool {
+	norm := strings.Join(strings.Fields(cmd), " ")
+	for _, p := range publishVerbPatterns {
+		if strings.Contains(norm, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// reverifyCommands independently re-runs the commands the verify phase reported
+// it observed green. It returns the offending command (for the abort comment)
+// and an error when the contract is violated or any command fails. An empty
+// list under a "fixed" verdict is itself a violation: a fix must have at least
+// one re-runnable check to confirm.
+func reverifyCommands(reverify commandRunner, workDir string, cmds []string) (string, error) {
+	if len(cmds) == 0 {
+		return "", fmt.Errorf("verify reported \"fixed\" but recorded no verified_commands to re-run")
+	}
+	for _, cmd := range cmds {
+		if containsPublishVerb(cmd) {
+			return cmd, fmt.Errorf("verified_commands contains a forbidden publish verb: %q", cmd)
+		}
+	}
+	for _, cmd := range cmds {
+		if o, err := reverify(workDir, "sh", "-c", cmd); err != nil {
+			return cmd, fmt.Errorf("command failed: %q: %w (output: %s)", cmd, err, strings.TrimSpace(string(o)))
+		}
+	}
+	return "", nil
+}
+
 // commitSummary collapses a verdict summary to a single short commit subject.
 func commitSummary(summary string) string {
 	s := strings.TrimSpace(summary)
@@ -282,6 +349,24 @@ func buildCIFixCommentBody(marker string, v verifyVerdict) string {
 	}
 	if v.Summary != "" {
 		fmt.Fprintf(&b, "- **Details**: %s\n", v.Summary)
+	}
+	b.WriteString(commentFooter)
+	return b.String()
+}
+
+// buildReverifyAbortCommentBody reports that the tool's independent re-run of
+// the verify phase's reported commands failed, so the fix was not published. It
+// includes the failing command (token references stay as ${VAR} indirection)
+// but never its output, which could echo a resolved secret.
+func buildReverifyAbortCommentBody(marker, failedCmd string) string {
+	var b strings.Builder
+	fmt.Fprintln(&b, marker)
+	fmt.Fprintln(&b, "## Claude auto-fix")
+	fmt.Fprintln(&b, "- **Verdict**: ❌ aborted — local re-verification failed (no push)")
+	if failedCmd != "" {
+		fmt.Fprintf(&b, "- **Failed command**: `%s`\n", failedCmd)
+	} else {
+		fmt.Fprintln(&b, "- **Detail**: verify reported a fix but recorded no commands to re-run")
 	}
 	b.WriteString(commentFooter)
 	return b.String()

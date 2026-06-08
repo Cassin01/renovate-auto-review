@@ -340,9 +340,13 @@ func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR, checks []Check
 		return runClaudeVerify(claudeBin, repo, pr.Number, wd, lg, cfg.CustomPrompt, env, w)
 	}
 	publishRunner := newStrippedRunner(buildPublishEnv(os.Environ()))
+	// The re-verification runner carries the scoped verify env (registry token
+	// present) so lint/build/test reproduce the verify phase; it never performs
+	// git/gh writes, so the token cannot leak through it.
+	reverifyRunner := newStrippedRunner(buildVerifyEnv(os.Environ()))
 
 	fmt.Fprintln(os.Stdout, sout.delim("--- claude verify output ---"))
-	res, err := runCIFix(publishRunner, verifier, repo, marker, workDir, pr, logs.String(), buildVerifyEnv(os.Environ()), os.Stdout)
+	res, err := runCIFix(publishRunner, reverifyRunner, verifier, repo, marker, workDir, pr, logs.String(), buildVerifyEnv(os.Environ()), os.Stdout)
 	fmt.Fprintln(os.Stdout, sout.delim("--- end ---"))
 	if res != nil {
 		switch {

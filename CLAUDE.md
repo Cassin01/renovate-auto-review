@@ -30,7 +30,7 @@ cross-cutting code accumulate in `main.go`.
 * `github.go`   : `gh` CLI wrappers (list/view PRs, status checks, logs, comments)
 * `claude.go`   : `claude` CLI invocation (review mode and verify mode), stream wiring
 * `stream.go`   : `claude` stream-json parsing → progress trace (redacted)
-* `cifix.go`    : token-safe CI auto-fix — verify/publish phase split, scoped/stripped env, secret scan
+* `cifix.go`    : token-safe CI auto-fix — verify/publish phase split, re-verification gate, scoped/stripped env, secret scan
 * `redact.go`   : credential redaction for stdout + the pre-publish secret scan
 * `lockfile.go` : deterministic lockfile-only auto-fix path (no `claude`)
 * `*_test.go`   : Tests, colocated with the file under test
@@ -40,8 +40,12 @@ cross-cutting code accumulate in `main.go`.
 The CI auto-fix flow is **phase-split for token safety**: a verify phase
 (`claude`, scoped env, cannot commit/push/comment) and a publish phase
 (tool-driven, registry-token env stripped, tracked-files-only staging,
-secret-scan abort). A private registry token is supplied via the environment
-only — never a config field. See `README.md` for the security model.
+secret-scan abort). Between them is a **re-verification gate**: the tool
+independently re-runs the `verified_commands` Claude reported green (scoped
+verify env, `git`/`gh` write verbs rejected) and refuses to publish unless all
+pass — the self-reported `fixed` verdict is not trusted on its own. A private
+registry token is supplied via the environment only — never a config field. See
+`README.md` for the security model.
 
 ## External CLI Dependencies
 

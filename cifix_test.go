@@ -99,6 +99,19 @@ func fixedVerifier(verdict verifyVerdict) claudeVerifier {
 	}
 }
 
+// okReverifyRunner is a re-verification runner whose every command succeeds.
+func okReverifyRunner() *fakeRunner {
+	return &fakeRunner{respond: func(call runnerCall) ([]byte, error) {
+		return nil, nil
+	}}
+}
+
+// fixedVerdict is a "fixed" verdict carrying a minimal non-empty
+// verified_commands list so it clears the re-verification gate.
+func fixedVerdict() verifyVerdict {
+	return verifyVerdict{Verdict: "fixed", VerifiedCommands: []string{"npm run lint"}}
+}
+
 func ciHappyResponder(call runnerCall) ([]byte, error) {
 	switch {
 	case argsMatch(call, "gh", "repo", "clone"):
@@ -125,14 +138,22 @@ func ciHappyResponder(call runnerCall) ([]byte, error) {
 
 func TestRunCIFixHappyPath(t *testing.T) {
 	fr := &fakeRunner{respond: ciHappyResponder}
+	rv := okReverifyRunner()
 	pr := PR{Number: 42, HeadRefName: "renovate/foo"}
-	res, err := runCIFix(fr.run, fixedVerifier(verifyVerdict{Verdict: "fixed", Summary: "rename dup mutation"}),
+	res, err := runCIFix(fr.run, rv.run, fixedVerifier(verifyVerdict{Verdict: "fixed", Summary: "rename dup mutation", VerifiedCommands: []string{"npm run lint", "npm run build"}}),
 		"owner/repo", "<!-- m -->", t.TempDir(), pr, "logs", nil, io.Discard)
 	if err != nil {
 		t.Fatalf("runCIFix: %v", err)
 	}
 	if !res.Pushed {
 		t.Errorf("expected Pushed=true, got %+v", res)
+	}
+
+	// Every reported command must be independently re-run before publishing.
+	for _, want := range []string{"npm run lint", "npm run build"} {
+		if !hasCall(rv.calls, "sh", "-c", want) {
+			t.Errorf("re-verification must run %q via sh -c; calls=%v", want, rv.calls)
+		}
 	}
 
 	wantSequence := [][]string{
@@ -180,7 +201,7 @@ func TestRunCIFixStagesTrackedOnly(t *testing.T) {
 	}
 	fr := &fakeRunner{respond: respond}
 	pr := PR{Number: 1, HeadRefName: "renovate/x"}
-	_, err := runCIFix(fr.run, fixedVerifier(verifyVerdict{Verdict: "fixed"}),
+	_, err := runCIFix(fr.run, okReverifyRunner().run, fixedVerifier(fixedVerdict()),
 		"o/r", "<!-- m -->", t.TempDir(), pr, "logs", nil, io.Discard)
 	if err != nil {
 		t.Fatalf("runCIFix: %v", err)
@@ -213,7 +234,7 @@ func TestRunCIFixSecretInDiffAborts(t *testing.T) {
 	}
 	fr := &fakeRunner{respond: respond}
 	pr := PR{Number: 9, HeadRefName: "renovate/y"}
-	res, err := runCIFix(fr.run, fixedVerifier(verifyVerdict{Verdict: "fixed"}),
+	res, err := runCIFix(fr.run, okReverifyRunner().run, fixedVerifier(fixedVerdict()),
 		"o/r", "<!-- m -->", t.TempDir(), pr, "logs", nil, io.Discard)
 	if err == nil {
 		t.Fatalf("expected abort error, got nil; res=%+v", res)
@@ -241,7 +262,7 @@ func TestRunCIFixSecretInDiffAborts(t *testing.T) {
 func TestRunCIFixUnfixableNoPush(t *testing.T) {
 	fr := &fakeRunner{respond: ciHappyResponder}
 	pr := PR{Number: 3, HeadRefName: "renovate/z"}
-	res, err := runCIFix(fr.run, fixedVerifier(verifyVerdict{Verdict: "unfixable", Summary: "major bump"}),
+	res, err := runCIFix(fr.run, okReverifyRunner().run, fixedVerifier(verifyVerdict{Verdict: "unfixable", Summary: "major bump"}),
 		"o/r", "<!-- m -->", t.TempDir(), pr, "logs", nil, io.Discard)
 	if err != nil {
 		t.Fatalf("runCIFix: %v", err)
@@ -268,7 +289,7 @@ func TestRunCIFixNoChangeNoPush(t *testing.T) {
 	}
 	fr := &fakeRunner{respond: respond}
 	pr := PR{Number: 4, HeadRefName: "renovate/w"}
-	res, err := runCIFix(fr.run, fixedVerifier(verifyVerdict{Verdict: "fixed"}),
+	res, err := runCIFix(fr.run, okReverifyRunner().run, fixedVerifier(fixedVerdict()),
 		"o/r", "<!-- m -->", t.TempDir(), pr, "logs", nil, io.Discard)
 	if err != nil {
 		t.Fatalf("runCIFix: %v", err)
@@ -295,7 +316,7 @@ func TestRunCIFixCloneFailureAborts(t *testing.T) {
 	}
 	fr := &fakeRunner{respond: respond}
 	pr := PR{Number: 1, HeadRefName: "renovate/x"}
-	_, err := runCIFix(fr.run, fixedVerifier(verifyVerdict{Verdict: "fixed"}),
+	_, err := runCIFix(fr.run, okReverifyRunner().run, fixedVerifier(fixedVerdict()),
 		"o/r", "<!-- m -->", t.TempDir(), pr, "logs", nil, io.Discard)
 	if err == nil {
 		t.Fatalf("expected clone error")
@@ -316,7 +337,7 @@ func TestRunCIFixForwardsScopedEnvToVerify(t *testing.T) {
 	fr := &fakeRunner{respond: ciHappyResponder}
 	pr := PR{Number: 7, HeadRefName: "renovate/foo"}
 	scoped := buildVerifyEnv([]string{"PATH=/x", "NODE_AUTH_TOKEN=tok"})
-	_, err := runCIFix(fr.run, verify, "o/r", "<!-- m -->", t.TempDir(), pr, "logs", scoped, io.Discard)
+	_, err := runCIFix(fr.run, okReverifyRunner().run, verify, "o/r", "<!-- m -->", t.TempDir(), pr, "logs", scoped, io.Discard)
 	if err != nil {
 		t.Fatalf("runCIFix: %v", err)
 	}
@@ -339,6 +360,71 @@ func TestBuildCIFixCommentBody(t *testing.T) {
 	}
 	if strings.Contains(un, "✅") {
 		t.Errorf("unfixable body must not contain ✅")
+	}
+}
+
+func TestRunCIFixReverifyFailureNoPush(t *testing.T) {
+	fr := &fakeRunner{respond: ciHappyResponder}
+	rv := &fakeRunner{respond: func(call runnerCall) ([]byte, error) {
+		if argsMatch(call, "sh", "-c", "npm run vue-tsc") {
+			return []byte("error TS2589"), errors.New("exit status 2")
+		}
+		return nil, nil
+	}}
+	pr := PR{Number: 50, HeadRefName: "renovate/x"}
+	res, err := runCIFix(fr.run, rv.run, fixedVerifier(verifyVerdict{Verdict: "fixed", VerifiedCommands: []string{"npm run vue-tsc"}}),
+		"o/r", "<!-- m -->", t.TempDir(), pr, "logs", nil, io.Discard)
+	if err == nil {
+		t.Fatalf("expected re-verification abort error, got nil; res=%+v", res)
+	}
+	if res.Pushed {
+		t.Errorf("must not push when re-verification fails")
+	}
+	for _, c := range fr.calls {
+		if argsMatch(c, "git", "push") || argsMatch(c, "git", "commit") || argsMatch(c, "git", "add") {
+			t.Errorf("must not publish when re-verification fails: %v", c)
+		}
+	}
+	if !hasCall(fr.calls, "gh", "pr", "comment") {
+		t.Errorf("re-verification failure must post a comment")
+	}
+}
+
+func TestRunCIFixFixedWithoutVerifiedCommandsAborts(t *testing.T) {
+	fr := &fakeRunner{respond: ciHappyResponder}
+	pr := PR{Number: 51, HeadRefName: "renovate/x"}
+	res, err := runCIFix(fr.run, okReverifyRunner().run, fixedVerifier(verifyVerdict{Verdict: "fixed"}),
+		"o/r", "<!-- m -->", t.TempDir(), pr, "logs", nil, io.Discard)
+	if err == nil {
+		t.Fatalf("expected abort when fixed verdict carries no verified_commands")
+	}
+	if res.Pushed {
+		t.Errorf("must not push a fixed verdict without verified_commands")
+	}
+	for _, c := range fr.calls {
+		if argsMatch(c, "git", "push") || argsMatch(c, "git", "commit") {
+			t.Errorf("must not publish without verified_commands: %v", c)
+		}
+	}
+}
+
+func TestRunCIFixReverifyRejectsPublishVerb(t *testing.T) {
+	fr := &fakeRunner{respond: ciHappyResponder}
+	rv := okReverifyRunner()
+	pr := PR{Number: 52, HeadRefName: "renovate/x"}
+	res, err := runCIFix(fr.run, rv.run, fixedVerifier(verifyVerdict{Verdict: "fixed", VerifiedCommands: []string{"git push origin HEAD"}}),
+		"o/r", "<!-- m -->", t.TempDir(), pr, "logs", nil, io.Discard)
+	if err == nil {
+		t.Fatalf("expected abort when verified_commands contains a publish verb")
+	}
+	if res.Pushed {
+		t.Errorf("must not push")
+	}
+	// The forbidden command must be rejected before any execution.
+	for _, c := range rv.calls {
+		if argsMatch(c, "sh", "-c", "git push origin HEAD") {
+			t.Errorf("forbidden publish verb must not be executed: %v", c)
+		}
 	}
 }
 
