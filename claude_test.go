@@ -121,6 +121,8 @@ func TestBuildVerifyPrompt(t *testing.T) {
 				"formatter",
 				"verified_commands",
 				"re-runs each independently",
+				"go mod download",
+				"prunes unrelated unused modules",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("expected substring %q not found", want)

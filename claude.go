@@ -121,6 +121,7 @@ const verifyPromptTemplate = `Target: %s PR #%d (Renovate auto-update). The PR b
 - Do not use ` + "`git commit --amend`" + ` / ` + "`git rebase`" + ` / ` + "`git reset --hard`" + ` / ` + "`git push --force`" + ` / ` + "`--force-with-lease`" + `
 - Do not use ` + "`gh pr edit`" + `
 - Do not attempt major breaking changes to dependencies (only minor type fixes, test adjustments, lockfile regeneration)
+- Keep manifest/lockfile edits minimal. For Go, add only the ` + "`go.sum`" + `/` + "`go.mod`" + ` entries the build needs (e.g. ` + "`go mod download <module>`" + ` or ` + "`go get <pkg>@<version>`" + `); do NOT run a repo-wide ` + "`go mod tidy`" + ` that prunes unrelated unused modules — pruning collides with concurrent dependency PRs and causes merge conflicts. Touch only the require/checksum lines for the dependency this PR is about
 
 [Secret handling — mandatory]
 - A private registry token may be in the environment (e.g. ` + "`NODE_AUTH_TOKEN`" + ` / ` + "`NPM_TOKEN`" + ` / ` + "`NPM_CONFIG_*`" + `). It is already provided for installs — do not configure auth yourself

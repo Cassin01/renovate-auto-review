@@ -29,6 +29,11 @@ func TestBuildVerifyEnv(t *testing.T) {
 		"NPM_CONFIG_REGISTRY=https://registry.example",
 		"MY_RANDOM_SECRET=nope",
 		"AWS_SESSION_TOKEN=bedrock",
+		"GOPATH=/home/u/go/1.25.4",
+		"GOTOOLCHAIN=auto",
+		"GOMODCACHE=/home/u/go/1.25.4/pkg/mod",
+		"GOCACHE=/home/u/.cache/go-build",
+		"GOFLAGS=-mod=mod",
 	}
 	got := envNames(buildVerifyEnv(in))
 
@@ -37,6 +42,7 @@ func TestBuildVerifyEnv(t *testing.T) {
 		"NODE_AUTH_TOKEN", "NPM_TOKEN",
 		"NPM_CONFIG_//npm.pkg.github.com/:_authToken", "NPM_CONFIG_REGISTRY",
 		"AWS_SESSION_TOKEN",
+		"GOPATH", "GOTOOLCHAIN", "GOMODCACHE", "GOCACHE", "GOFLAGS",
 	} {
 		if _, ok := got[name]; !ok {
 			t.Errorf("buildVerifyEnv: want %q forwarded, missing", name)

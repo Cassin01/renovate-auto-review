@@ -35,6 +35,10 @@ var verifyEnvExactAllow = map[string]struct{}{
 	"GITHUB_TOKEN": {},
 	"HTTP_PROXY":   {}, "HTTPS_PROXY": {}, "NO_PROXY": {},
 	"http_proxy": {}, "https_proxy": {}, "no_proxy": {},
+	// Go toolchain provisioning: without these the build/test re-run falls back
+	// to the default GOPATH ($HOME/go), which may not be writable for a
+	// go.mod-directed toolchain auto-download.
+	"GOPATH": {}, "GOTOOLCHAIN": {}, "GOMODCACHE": {}, "GOCACHE": {}, "GOFLAGS": {},
 }
 
 // verifyEnvPrefixAllow forwards whole families needed by claude (ANTHROPIC_/
