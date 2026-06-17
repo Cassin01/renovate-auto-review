@@ -39,6 +39,8 @@ The target repository is specified on the command line — see [Usage](#usage).
 | `limit`           | int      | `50`                | Maximum number of PRs fetched by `gh pr list`                              |
 | `auto_fix_ci`     | bool     | `false`             | When true, Claude attempts to auto-fix and push on CI failure              |
 | `auto_fix_label`  | string   | `"claude-auto-fix"` | Per-PR opt-in label. A PR with this label is treated as if `auto_fix_ci = true` |
+| `auto_rebase_conflicts` | bool | `false`           | When true, a `CONFLICTING` Renovate PR gets the rebase label so Renovate rebases it (see below). Independent of `auto_fix_ci` |
+| `rebase_label`    | string   | `"rebase"`          | Label that triggers a Renovate rebase; must match Renovate's `rebaseLabel`  |
 | `work_dir`        | string   | `os.TempDir()`      | Parent directory for temporary work dirs used during CI auto-fix           |
 | `custom_prompt`   | string   | `""`                | Extra instructions appended to every Claude prompt (see below)             |
 | `allowed_owners`  | []string | `[]`                | Domain guard: allowed repository owners (see below). Empty = disabled       |
@@ -243,10 +245,26 @@ it** (official behavior). So while pushing is allowed, note that:
   responsible for getting the PR merged
 
 The tool guards against this by excluding `gh pr edit` from `allowedTools`
-and by repeatedly forbidding it in the prompt, so Claude does not
-accidentally toggle the checkbox or attach the label.
+and by repeatedly forbidding it in the prompt, so **Claude** does not
+accidentally toggle the checkbox or attach the label during a CI auto-fix.
 
-CI auto-fix is also skipped under `-dry-run`.
+### Conflict handling: requesting a Renovate rebase
+
+When `auto_rebase_conflicts = true`, the **orchestrator itself** (not Claude)
+attaches the `rebase_label` to any Renovate PR whose `mergeable` state is
+`CONFLICTING`, so Renovate rebases/regenerates the branch and resolves the
+conflict. This is the inverse of the caveat above and is safe precisely because
+a pure-conflict PR has no tool-pushed commits to wipe out — Renovate stays the
+branch owner. Claude's `allowedTools` still excludes `gh pr edit`; only the
+gated, opt-in orchestrator path adds the label.
+
+The action is idempotent: it is skipped if the rebase label is already present
+(a request Renovate has not yet acted on) or if a marker comment was already
+posted with no newer commit since. A conflicting PR skips the merge-safety
+review for that run, and a freshly requested rebase skips the CI auto-fix path
+(the branch is about to change).
+
+Both CI auto-fix and conflict handling are skipped under `-dry-run`.
 
 ## Known limitations
 

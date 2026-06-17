@@ -186,8 +186,11 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool, prNum
 		ciFailing := checksErr == nil && hasFailingChecks(checks)
 
 		actionRan := false
+		conflicting := pr.Mergeable == mergeableConflicting
 
 		switch {
+		case conflicting:
+			fmt.Fprintln(os.Stdout, sout.warn("review skip: PR is conflicting"))
 		case ciFailing:
 			fmt.Fprintln(os.Stdout, sout.warn("review skip: CI is failing"))
 		case shouldSkipReview(comments, commits, marker):
@@ -204,7 +207,19 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool, prNum
 			}
 		}
 
-		if ciFailing && (cfg.AutoFixCI || hasAutoFixLabel(pr, cfg.AutoFixLabel)) {
+		rebaseRequested := false
+		if shouldRequestRebase(pr, cfg, comments, commits, marker) {
+			if err := requestRebase(repo, marker, cfg, pr); err != nil {
+				log.Printf("%s #%d: request-rebase: %v", repo, pr.Number, err)
+				failed++
+			} else {
+				fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf("requested Renovate rebase (label %q)", cfg.RebaseLabel)))
+				actionRan = true
+				rebaseRequested = true
+			}
+		}
+
+		if !rebaseRequested && ciFailing && (cfg.AutoFixCI || hasAutoFixLabel(pr, cfg.AutoFixLabel)) {
 			handled, ran, err := tryFixLockfileForPR(repo, marker, cfg, pr)
 			if err != nil {
 				log.Printf("%s #%d: lockfile-fix: %v", repo, pr.Number, err)

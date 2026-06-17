@@ -12,11 +12,13 @@ import (
 )
 
 type Config struct {
-	Limit        int    `toml:"limit"`
-	AutoFixCI    bool   `toml:"auto_fix_ci"`
-	AutoFixLabel string `toml:"auto_fix_label"`
-	WorkDir      string `toml:"work_dir"`
-	CustomPrompt string `toml:"custom_prompt"`
+	Limit               int    `toml:"limit"`
+	AutoFixCI           bool   `toml:"auto_fix_ci"`
+	AutoFixLabel        string `toml:"auto_fix_label"`
+	AutoRebaseConflicts bool   `toml:"auto_rebase_conflicts"`
+	RebaseLabel         string `toml:"rebase_label"`
+	WorkDir             string `toml:"work_dir"`
+	CustomPrompt        string `toml:"custom_prompt"`
 
 	AllowedOwners []string `toml:"allowed_owners"`
 
@@ -24,6 +26,10 @@ type Config struct {
 }
 
 const defaultAutoFixLabel = "claude-auto-fix"
+
+// defaultRebaseLabel matches Renovate's default rebaseLabel. Attaching it to a
+// PR signals Renovate to rebase/regenerate the branch.
+const defaultRebaseLabel = "rebase"
 
 func defaultConfigPath() (string, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
@@ -64,6 +70,9 @@ func applyConfigDefaults(cfg *Config) {
 	if cfg.AutoFixLabel == "" {
 		cfg.AutoFixLabel = defaultAutoFixLabel
 	}
+	if cfg.RebaseLabel == "" {
+		cfg.RebaseLabel = defaultRebaseLabel
+	}
 	if cfg.WorkDir == "" {
 		cfg.WorkDir = os.TempDir()
 	}
@@ -92,6 +101,15 @@ auto_fix_ci = false
 
 # Label name used for per-PR opt-in (default "claude-auto-fix")
 # auto_fix_label = "claude-auto-fix"
+
+# Hand conflicting Renovate PRs back to Renovate by attaching the rebase label
+# so Renovate rebases/regenerates the branch (default false). Independent of
+# auto_fix_ci. The tool — not Claude — attaches the label.
+auto_rebase_conflicts = false
+
+# Label that triggers a Renovate rebase; must match Renovate's "rebaseLabel"
+# (default "rebase").
+# rebase_label = "rebase"
 
 # Parent directory used for temporary work dirs during CI auto-fix (default os.TempDir())
 # work_dir = "/tmp"

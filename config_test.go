@@ -18,37 +18,47 @@ func TestApplyConfigDefaults(t *testing.T) {
 		{
 			name: "zero limit filled",
 			in:   Config{Limit: 0},
-			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
+			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
 		},
 		{
 			name: "negative limit filled",
 			in:   Config{Limit: -1},
-			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
+			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
 		},
 		{
 			name: "values preserved",
 			in:   Config{Limit: 7},
-			want: Config{Limit: 7, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
+			want: Config{Limit: 7, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
 		},
 		{
 			name: "empty filled",
 			in:   Config{},
-			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
+			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
 		},
 		{
 			name: "auto-fix label preserved",
 			in:   Config{Limit: 10, AutoFixLabel: "custom-label"},
-			want: Config{Limit: 10, AutoFixLabel: "custom-label", WorkDir: os.TempDir()},
+			want: Config{Limit: 10, AutoFixLabel: "custom-label", RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
 		},
 		{
 			name: "work_dir preserved",
 			in:   Config{Limit: 10, WorkDir: "/var/tmp"},
-			want: Config{Limit: 10, AutoFixLabel: defaultAutoFixLabel, WorkDir: "/var/tmp"},
+			want: Config{Limit: 10, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: "/var/tmp"},
 		},
 		{
 			name: "auto_fix_ci flag preserved",
 			in:   Config{Limit: 10, AutoFixCI: true},
-			want: Config{Limit: 10, AutoFixCI: true, AutoFixLabel: defaultAutoFixLabel, WorkDir: os.TempDir()},
+			want: Config{Limit: 10, AutoFixCI: true, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
+		},
+		{
+			name: "rebase label preserved",
+			in:   Config{Limit: 10, RebaseLabel: "needs-rebase"},
+			want: Config{Limit: 10, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: "needs-rebase", WorkDir: os.TempDir()},
+		},
+		{
+			name: "auto_rebase_conflicts flag preserved",
+			in:   Config{Limit: 10, AutoRebaseConflicts: true},
+			want: Config{Limit: 10, AutoRebaseConflicts: true, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
 		},
 	}
 

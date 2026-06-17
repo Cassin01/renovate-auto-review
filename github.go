@@ -237,15 +237,35 @@ func pickFailedRunIDs(checks []CheckRun) []string {
 }
 
 func hasAutoFixLabel(pr PR, label string) bool {
-	if label == "" {
+	return prHasLabel(pr, label)
+}
+
+// prHasLabel reports whether pr carries the given label. An empty name never
+// matches.
+func prHasLabel(pr PR, name string) bool {
+	if name == "" {
 		return false
 	}
 	for _, l := range pr.Labels {
-		if l.Name == label {
+		if l.Name == name {
 			return true
 		}
 	}
 	return false
+}
+
+// addPRLabel attaches a label to a PR. It is the orchestrator-driven trigger
+// for Renovate's rebase (Claude's allowedTools still excludes gh pr edit).
+func addPRLabel(repo string, prNumber int, label string) error {
+	out, err := exec.Command(
+		"gh", "pr", "edit", strconv.Itoa(prNumber),
+		"--repo", repo,
+		"--add-label", label,
+	).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr edit --add-label: %w (output: %s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // RunState is the current status/conclusion of a GitHub Actions run, fetched

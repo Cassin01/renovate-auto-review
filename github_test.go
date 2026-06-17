@@ -364,6 +364,48 @@ func TestHasAutoFixLabel(t *testing.T) {
 	}
 }
 
+func TestPRHasLabel(t *testing.T) {
+	cases := []struct {
+		name  string
+		pr    PR
+		label string
+		want  bool
+	}{
+		{
+			name:  "present",
+			pr:    PR{Labels: []Label{{Name: "renovate"}, {Name: "rebase"}}},
+			label: "rebase",
+			want:  true,
+		},
+		{
+			name:  "missing",
+			pr:    PR{Labels: []Label{{Name: "renovate"}}},
+			label: "rebase",
+			want:  false,
+		},
+		{
+			name:  "no labels",
+			pr:    PR{},
+			label: "rebase",
+			want:  false,
+		},
+		{
+			name:  "empty name opts out",
+			pr:    PR{Labels: []Label{{Name: ""}}},
+			label: "",
+			want:  false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := prHasLabel(tc.pr, tc.label); got != tc.want {
+				t.Errorf("prHasLabel() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTailBytes(t *testing.T) {
 	cases := []struct {
 		name string
