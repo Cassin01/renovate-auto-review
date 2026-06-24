@@ -174,8 +174,10 @@ Behavior:
 5. On a `fixed` verdict, the tool **re-runs each `verified_commands` entry
    itself** (same scoped verify env, so lint/build/test reproduce what Claude
    saw) and refuses to publish unless all pass — turning the self-reported
-   verdict into a machine-checked gate. It then stages **tracked changes only**,
-   scans the staged diff and comment body for secrets, then commits as
+   verdict into a machine-checked gate. It then stages tracked changes **plus
+   newly-created files** (skipping untracked directories and credential-named
+   files such as `.npmrc`/`.env*`/`.netrc`/`.git-credentials`), scans the staged
+   diff and comment body for secrets, then commits as
    `fix(ci): <summary> [claude-auto-fix]`, pushes, and posts the comment
 
 The verify phase enforces:
@@ -226,9 +228,12 @@ kept from leaking by two layers:
    re-runs read-only lint/build/test — `git`/`gh` write verbs are rejected
    before execution, so the token never reaches a publish operation through it.
    Publish itself runs with the registry-token vars **stripped**, never invokes
-   a package manager, stages **tracked files only** (an accidental literal-token
-   `.npmrc` is untracked and excluded), and aborts before commit/push if a
-   secret pattern is found in the staged diff or comment.
+   a package manager, and stages tracked changes plus newly-created files —
+   excluding untracked directories and credential-named files (`.npmrc`,
+   `.env*`, `.netrc`, `.git-credentials`, …), so an accidental literal-token
+   `.npmrc` is dropped by name. It then aborts before commit/push if a secret
+   pattern is found in the staged diff or comment, which is the content gate for
+   token values in any other newly-staged file.
 2. **Redaction (defense-in-depth).** All subprocess stdout/stderr is passed
    through a redactor that scrubs credential-shaped strings and the runtime
    values of the known token env vars before anything is printed.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path"
 	"slices"
 	"strings"
 )
@@ -206,7 +207,7 @@ func runCIFix(run, reverify commandRunner, verify claudeVerifier, repo, marker, 
 	if err != nil {
 		return res, fmt.Errorf("git status: %w", err)
 	}
-	paths := trackedModifiedPaths(string(statusOut))
+	paths := stageablePaths(string(statusOut))
 	if len(paths) == 0 {
 		res.NoChange = true
 		body := buildCIFixCommentBody(marker, verifyVerdict{
@@ -248,26 +249,49 @@ func runCIFix(run, reverify commandRunner, verify claudeVerifier, repo, marker, 
 	return res, postCommentViaFile(run, workDir, repo, pr.Number, body)
 }
 
-// trackedModifiedPaths returns paths of tracked, modified files from
-// `git status --porcelain`, excluding untracked (`??`) entries. Excluding
-// untracked files structurally prevents an accidental credential file (e.g. a
-// freshly written `.npmrc` holding a literal token) from being committed.
-func trackedModifiedPaths(porcelain string) []string {
+// credentialBasenames are filenames that commonly carry a literal credential.
+// They are excluded from staging even when untracked, so a credential file
+// accidentally written by the verify phase is never committed. This is defense
+// in depth; the staged-diff secret scan independently catches token values.
+var credentialBasenames = map[string]struct{}{
+	".npmrc": {}, ".env": {}, ".netrc": {}, "_netrc": {},
+	".git-credentials": {}, ".pypirc": {}, ".dockercfg": {}, "credentials": {},
+}
+
+// isCredentialFile reports whether p's basename is a known credential filename
+// (including the `.env.*` family).
+func isCredentialFile(p string) bool {
+	base := path.Base(p)
+	if _, ok := credentialBasenames[base]; ok {
+		return true
+	}
+	return strings.HasPrefix(base, ".env.")
+}
+
+// stageablePaths returns the paths to stage from `git status --porcelain`:
+// tracked modifications plus newly-created files. Because the auto-fix runs in
+// a fresh clone, any untracked file present after the verify phase was created
+// by that phase. Two classes of untracked entry are skipped: directories
+// (porcelain collapses them to a single `dir/` line, so staging would pull in a
+// non-gitignored tree like `node_modules/`) and credential-named files. The
+// staged-diff secret scan remains the content gate for token values.
+func stageablePaths(porcelain string) []string {
 	var paths []string
 	for line := range strings.SplitSeq(strings.TrimRight(porcelain, "\n"), "\n") {
 		if len(line) < 4 {
 			continue
 		}
-		if line[:2] == "??" {
+		p := strings.TrimSpace(line[3:])
+		if i := strings.Index(p, " -> "); i >= 0 {
+			p = p[i+4:]
+		}
+		if p == "" {
 			continue
 		}
-		path := strings.TrimSpace(line[3:])
-		if i := strings.Index(path, " -> "); i >= 0 {
-			path = path[i+4:]
+		if line[:2] == "??" && (strings.HasSuffix(p, "/") || isCredentialFile(p)) {
+			continue
 		}
-		if path != "" {
-			paths = append(paths, path)
-		}
+		paths = append(paths, p)
 	}
 	return paths
 }

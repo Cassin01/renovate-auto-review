@@ -39,8 +39,9 @@ cross-cutting code accumulate in `main.go`.
 
 The CI auto-fix flow is **phase-split for token safety**: a verify phase
 (`claude`, scoped env, cannot commit/push/comment) and a publish phase
-(tool-driven, registry-token env stripped, tracked-files-only staging,
-secret-scan abort). Between them is a **re-verification gate**: the tool
+(tool-driven, registry-token env stripped, staged-add with structural guards —
+untracked-directory skip + credential-name denylist — backed by the staged-diff
+secret scan, secret-scan abort). Between them is a **re-verification gate**: the tool
 independently re-runs the `verified_commands` Claude reported green (scoped
 verify env, `git`/`gh` write verbs rejected) and refuses to publish unless all
 pass — the self-reported `fixed` verdict is not trusted on its own. A private

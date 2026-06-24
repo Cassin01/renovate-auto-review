@@ -76,7 +76,7 @@ func TestBuildPublishEnv(t *testing.T) {
 	}
 }
 
-func TestTrackedModifiedPaths(t *testing.T) {
+func TestStageablePaths(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
@@ -84,16 +84,19 @@ func TestTrackedModifiedPaths(t *testing.T) {
 	}{
 		{"empty", "", nil},
 		{"single modified", " M src/index.ts\n", []string{"src/index.ts"}},
-		{"untracked excluded", "?? .npmrc\n M src/index.ts\n", []string{"src/index.ts"}},
 		{"added staged", "A  src/new.ts\n", []string{"src/new.ts"}},
 		{"rename", "R  old.ts -> new.ts\n", []string{"new.ts"}},
-		{"only untracked", "?? .npmrc\n?? node_modules/\n", nil},
+		{"new untracked file", "?? pnpm-workspace.yaml\n", []string{"pnpm-workspace.yaml"}},
+		{"untracked dir skipped", "?? node_modules/\n", nil},
+		{"credential denylist", "?? .env\n?? .env.local\n?? .netrc\n", nil},
+		{"untracked .npmrc excluded", "?? .npmrc\n M src/index.ts\n", []string{"src/index.ts"}},
+		{"mixed", "?? .npmrc\n?? pnpm-workspace.yaml\n M src/index.ts\n", []string{"pnpm-workspace.yaml", "src/index.ts"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := trackedModifiedPaths(tc.in)
+			got := stageablePaths(tc.in)
 			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
-				t.Errorf("trackedModifiedPaths(%q): want %v, got %v", tc.in, tc.want, got)
+				t.Errorf("stageablePaths(%q): want %v, got %v", tc.in, tc.want, got)
 			}
 		})
 	}
@@ -198,7 +201,20 @@ func TestRunCIFixHappyPath(t *testing.T) {
 	}
 }
 
-func TestRunCIFixStagesTrackedOnly(t *testing.T) {
+// firstAddCall returns the first `git add` call recorded by fr, failing the
+// test if none exists.
+func firstAddCall(t *testing.T, fr *fakeRunner) runnerCall {
+	t.Helper()
+	for i := range fr.calls {
+		if argsMatch(fr.calls[i], "git", "add") {
+			return fr.calls[i]
+		}
+	}
+	t.Fatalf("no git add call recorded")
+	return runnerCall{}
+}
+
+func TestRunCIFixBlocksUntrackedCredential(t *testing.T) {
 	respond := func(call runnerCall) ([]byte, error) {
 		if argsMatch(call, "git", "status", "--porcelain") {
 			return []byte("?? .npmrc\n M src/index.ts\n"), nil
@@ -212,22 +228,55 @@ func TestRunCIFixStagesTrackedOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runCIFix: %v", err)
 	}
-	var addCall *runnerCall
-	for i := range fr.calls {
-		if argsMatch(fr.calls[i], "git", "add") {
-			addCall = &fr.calls[i]
-			break
-		}
-	}
-	if addCall == nil {
-		t.Fatalf("no git add call recorded")
-	}
-	joined := strings.Join(addCall.args, " ")
+	joined := strings.Join(firstAddCall(t, fr).args, " ")
 	if !strings.Contains(joined, "src/index.ts") {
 		t.Errorf("git add must stage tracked path src/index.ts; got %q", joined)
 	}
 	if strings.Contains(joined, ".npmrc") {
-		t.Errorf("git add must NOT stage untracked .npmrc; got %q", joined)
+		t.Errorf("git add must NOT stage credential-named .npmrc; got %q", joined)
+	}
+}
+
+func TestRunCIFixStagesNewConfigFile(t *testing.T) {
+	respond := func(call runnerCall) ([]byte, error) {
+		if argsMatch(call, "git", "status", "--porcelain") {
+			return []byte("?? pnpm-workspace.yaml\n"), nil
+		}
+		return ciHappyResponder(call)
+	}
+	fr := &fakeRunner{respond: respond}
+	pr := PR{Number: 228, HeadRefName: "renovate/pnpm"}
+	res, err := runCIFix(fr.run, okReverifyRunner().run, fixedVerifier(fixedVerdict()),
+		"o/r", "<!-- m -->", t.TempDir(), pr, "logs", nil, io.Discard)
+	if err != nil {
+		t.Fatalf("runCIFix: %v", err)
+	}
+	if !res.Pushed {
+		t.Errorf("expected a newly-created config file to be published; got %+v", res)
+	}
+	joined := strings.Join(firstAddCall(t, fr).args, " ")
+	if !strings.Contains(joined, "pnpm-workspace.yaml") {
+		t.Errorf("git add must stage the new pnpm-workspace.yaml; got %q", joined)
+	}
+}
+
+func TestRunCIFixSkipsUntrackedDir(t *testing.T) {
+	respond := func(call runnerCall) ([]byte, error) {
+		if argsMatch(call, "git", "status", "--porcelain") {
+			return []byte("?? node_modules/\n M src/index.ts\n"), nil
+		}
+		return ciHappyResponder(call)
+	}
+	fr := &fakeRunner{respond: respond}
+	pr := PR{Number: 2, HeadRefName: "renovate/x"}
+	_, err := runCIFix(fr.run, okReverifyRunner().run, fixedVerifier(fixedVerdict()),
+		"o/r", "<!-- m -->", t.TempDir(), pr, "logs", nil, io.Discard)
+	if err != nil {
+		t.Fatalf("runCIFix: %v", err)
+	}
+	joined := strings.Join(firstAddCall(t, fr).args, " ")
+	if strings.Contains(joined, "node_modules") {
+		t.Errorf("git add must NOT stage an untracked directory; got %q", joined)
 	}
 }
 
