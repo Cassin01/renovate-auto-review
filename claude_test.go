@@ -123,6 +123,10 @@ func TestBuildVerifyPrompt(t *testing.T) {
 				"re-runs each independently",
 				"go mod download",
 				"prunes unrelated unused modules",
+				"one-shot headless session",
+				"Do NOT run any command in the background",
+				"foreground with an explicit timeout",
+				"scoped to the packages affected by this PR",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("expected substring %q not found", want)
