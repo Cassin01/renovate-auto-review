@@ -40,6 +40,18 @@ var verifyEnvExactAllow = map[string]struct{}{
 	// to the default GOPATH ($HOME/go), which may not be writable for a
 	// go.mod-directed toolchain auto-download.
 	"GOPATH": {}, "GOTOOLCHAIN": {}, "GOMODCACHE": {}, "GOCACHE": {}, "GOFLAGS": {},
+	"BASH_DEFAULT_TIMEOUT_MS": {}, "BASH_MAX_TIMEOUT_MS": {},
+}
+
+// verifyBashTimeoutDefaults raise the claude Bash tool's command timeout to its
+// 10-minute maximum. The verify subprocess runs `claude --print` (one-shot):
+// with the 120s default, a full test suite gets auto-moved to the background
+// and claude ends its turn to wait — which terminates the headless session
+// before VERIFY_DONE is printed. Values already present in the environment
+// take precedence.
+var verifyBashTimeoutDefaults = []string{
+	"BASH_DEFAULT_TIMEOUT_MS=600000",
+	"BASH_MAX_TIMEOUT_MS=600000",
 }
 
 // verifyEnvPrefixAllow forwards whole families needed by claude (ANTHROPIC_/
@@ -87,12 +99,21 @@ func verifyEnvAllowed(name string) bool {
 
 // buildVerifyEnv returns the allowlisted subset of environ handed to the verify
 // subprocess: tooling/gh/claude baseline plus registry-token vars so `npm ci`
-// can resolve `${NODE_AUTH_TOKEN}`. Everything else is dropped.
+// can resolve `${NODE_AUTH_TOKEN}`. Everything else is dropped. Bash timeout
+// defaults are appended unless the caller's environment already sets them.
 func buildVerifyEnv(environ []string) []string {
-	out := make([]string, 0, len(environ))
+	out := make([]string, 0, len(environ)+len(verifyBashTimeoutDefaults))
 	for _, kv := range environ {
 		if verifyEnvAllowed(envName(kv)) {
 			out = append(out, kv)
+		}
+	}
+	for _, def := range verifyBashTimeoutDefaults {
+		present := slices.ContainsFunc(out, func(kv string) bool {
+			return envName(kv) == envName(def)
+		})
+		if !present {
+			out = append(out, def)
 		}
 	}
 	return out

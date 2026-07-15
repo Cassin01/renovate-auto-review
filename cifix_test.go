@@ -53,6 +53,58 @@ func TestBuildVerifyEnv(t *testing.T) {
 	}
 }
 
+func TestBuildVerifyEnvBashTimeouts(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want map[string]string
+	}{
+		{
+			name: "defaults injected when absent",
+			in:   []string{"PATH=/usr/bin"},
+			want: map[string]string{
+				"BASH_DEFAULT_TIMEOUT_MS": "600000",
+				"BASH_MAX_TIMEOUT_MS":     "600000",
+			},
+		},
+		{
+			name: "empty environ still gets defaults",
+			in:   nil,
+			want: map[string]string{
+				"BASH_DEFAULT_TIMEOUT_MS": "600000",
+				"BASH_MAX_TIMEOUT_MS":     "600000",
+			},
+		},
+		{
+			name: "user override wins",
+			in:   []string{"BASH_DEFAULT_TIMEOUT_MS=120000"},
+			want: map[string]string{
+				"BASH_DEFAULT_TIMEOUT_MS": "120000",
+				"BASH_MAX_TIMEOUT_MS":     "600000",
+			},
+		},
+		{
+			name: "both overridden",
+			in:   []string{"BASH_DEFAULT_TIMEOUT_MS=1", "BASH_MAX_TIMEOUT_MS=9999999999"},
+			want: map[string]string{
+				"BASH_DEFAULT_TIMEOUT_MS": "1",
+				"BASH_MAX_TIMEOUT_MS":     "9999999999",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := envNames(buildVerifyEnv(tc.in))
+			for name, want := range tc.want {
+				if got[name] != want {
+					t.Errorf("buildVerifyEnv: want %s=%q, got %q", name, want, got[name])
+				}
+			}
+		})
+	}
+}
+
 func TestBuildPublishEnv(t *testing.T) {
 	in := []string{
 		"PATH=/usr/bin",
