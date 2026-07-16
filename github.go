@@ -27,6 +27,7 @@ type PR struct {
 	Labels      []Label `json:"labels"`
 	Mergeable   string  `json:"mergeable"`
 	HeadRefName string  `json:"headRefName"`
+	HeadRefOid  string  `json:"headRefOid"`
 	URL         string  `json:"url"`
 }
 
@@ -47,7 +48,7 @@ func listOpenPRs(repo string, limit int) ([]PR, error) {
 		"gh", "pr", "list",
 		"--repo", repo,
 		"--state", "open",
-		"--json", "number,title,author,labels,mergeable,headRefName,url",
+		"--json", "number,title,author,labels,mergeable,headRefName,headRefOid,url",
 		"--limit", strconv.Itoa(limit),
 	).Output()
 	if err != nil {
@@ -67,7 +68,7 @@ func fetchPR(repo string, prNumber int) (PR, error) {
 	out, err := exec.Command(
 		"gh", "pr", "view", strconv.Itoa(prNumber),
 		"--repo", repo,
-		"--json", "number,title,author,labels,mergeable,headRefName,url",
+		"--json", "number,title,author,labels,mergeable,headRefName,headRefOid,url",
 	).Output()
 	if err != nil {
 		return PR{}, fmt.Errorf("gh pr view %d: %w (stderr: %s)", prNumber, err, stderrOf(err))
@@ -270,9 +271,13 @@ func addPRLabel(repo string, prNumber int, label string) error {
 
 // RunState is the current status/conclusion of a GitHub Actions run, fetched
 // fresh at fix time to re-validate the possibly-stale statusCheckRollup.
+// HeadSha is the commit the run executed against; it is compared with the PR's
+// current head to reject a superseded run whose failure a later push may have
+// already fixed.
 type RunState struct {
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
+	HeadSha    string `json:"head_sha"`
 }
 
 // fetchRunState returns the run's current status and conclusion. It uses the
@@ -304,6 +309,29 @@ func isGenuineCIFailure(conclusion string) bool {
 		return true
 	}
 	return false
+}
+
+// runIsForHead reports whether a failed run should still be trusted as the PR's
+// current failure. The statusCheckRollup can lag behind a just-pushed commit
+// and surface a run from an earlier commit whose failure a later push (e.g. a
+// prior auto-fix) has already resolved. Reproducing such a superseded run wastes
+// a fix cycle and yields a misleading "nochange". When both SHAs are known and
+// differ, the run is superseded and not actionable. If either SHA is unknown,
+// the comparison is inconclusive and the run is not blocked on this basis.
+func runIsForHead(runHeadSha, prHeadOid string) bool {
+	if runHeadSha == "" || prHeadOid == "" {
+		return true
+	}
+	return runHeadSha == prHeadOid
+}
+
+// shortSHA abbreviates a commit SHA for log messages, leaving shorter or empty
+// values untouched.
+func shortSHA(sha string) string {
+	if len(sha) <= 9 {
+		return sha
+	}
+	return sha[:9]
 }
 
 const maxFailedLogBytes = 50_000

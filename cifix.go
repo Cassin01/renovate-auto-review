@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
 	"path"
 	"slices"
 	"strings"
+	"time"
 )
 
 // knownRegistryTokenEnvNames are the exact env var names treated as private
@@ -217,6 +219,9 @@ func runCIFix(run, reverify commandRunner, verify claudeVerifier, repo, marker, 
 	if failedCmd, rerr := reverifyCommands(reverify, workDir, verdict.VerifiedCommands); rerr != nil {
 		red := newRedactor()
 		body := buildReverifyAbortCommentBody(marker, failedCmd)
+		if errors.Is(rerr, errEnvUnavailable) {
+			body = buildReverifyUnavailableCommentBody(marker, failedCmd)
+		}
 		if hits := scanForSecrets(red, body); len(hits) > 0 {
 			body = buildSecretAbortCommentBody(marker, hits)
 		}
@@ -341,6 +346,55 @@ func containsPublishVerb(cmd string) bool {
 	return false
 }
 
+// errEnvUnavailable marks a re-verification failure caused by an unreachable
+// dependency (DNS/connection failure) rather than a defective fix. The caller
+// uses it to post an environment-issue comment instead of a fix-rejection one.
+var errEnvUnavailable = errors.New("re-verification environment unavailable")
+
+// reverifyNetworkRetries is how many extra attempts a re-verification command
+// gets after its first failure, but only when that failure looks like a
+// transient network/DNS problem. The verify phase reached the same dependency
+// moments earlier, so a single retry rescues most flakes without re-running a
+// long build more than twice.
+var reverifyNetworkRetries = 1
+
+// reverifyRetryBackoff is the pause before a network-failure retry. Overridden
+// to zero in tests.
+var reverifyRetryBackoff = 3 * time.Second
+
+// transientNetworkSignatures are substrings (matched case-insensitively) that
+// mark a command failure as an unreachable-dependency problem: a build/test
+// that fetches a remote GraphQL schema, downloads a module, or pulls an image
+// can fail this way even when the source change is correct. Compile/test
+// failures never match these, so they are not retried.
+var transientNetworkSignatures = []string{
+	"getaddrinfo",                          // Node DNS resolver
+	"enotfound",                            // DNS: host not found
+	"eai_again",                            // DNS: temporary failure
+	"could not resolve host",               // curl/git
+	"temporary failure in name resolution", // glibc resolver
+	"econnrefused",                         // connection refused
+	"econnreset",                           // connection reset by peer
+	"etimedout",                            // socket timeout
+	"network is unreachable",               // no route
+	"connection timed out",                 // TCP connect timeout
+	"tls handshake timeout",                // TLS stall
+	"i/o timeout",                          // Go net timeout
+	"dial tcp",                             // Go net dial failure
+}
+
+// isTransientNetworkFailure reports whether a failed command's combined output
+// indicates an unreachable dependency rather than a real lint/build/test error.
+func isTransientNetworkFailure(output string) bool {
+	lower := strings.ToLower(output)
+	for _, sig := range transientNetworkSignatures {
+		if strings.Contains(lower, sig) {
+			return true
+		}
+	}
+	return false
+}
+
 // reverifyCommands independently re-runs the commands the verify phase reported
 // it observed green. It returns the offending command (for the abort comment)
 // and an error when the contract is violated or any command fails. An empty
@@ -356,11 +410,36 @@ func reverifyCommands(reverify commandRunner, workDir string, cmds []string) (st
 		}
 	}
 	for _, cmd := range cmds {
-		if o, err := reverify(workDir, "sh", "-c", cmd); err != nil {
-			return cmd, fmt.Errorf("command failed: %q: %w (output: %s)", cmd, err, strings.TrimSpace(string(o)))
+		if err := runReverifyCommand(reverify, workDir, cmd); err != nil {
+			return cmd, err
 		}
 	}
 	return "", nil
+}
+
+// runReverifyCommand runs one re-verification command. A genuine lint/build/
+// test failure is returned immediately. A failure that looks like a transient
+// network/DNS problem is retried up to reverifyNetworkRetries times; if it
+// still fails that way, the error wraps errEnvUnavailable so the caller reports
+// it as an environment issue rather than a fix rejection.
+func runReverifyCommand(reverify commandRunner, workDir, cmd string) error {
+	var lastOut string
+	for attempt := 0; attempt <= reverifyNetworkRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(reverifyRetryBackoff)
+		}
+		o, err := reverify(workDir, "sh", "-c", cmd)
+		if err == nil {
+			return nil
+		}
+		out := strings.TrimSpace(string(o))
+		if !isTransientNetworkFailure(out) {
+			return fmt.Errorf("command failed: %q: %w (output: %s)", cmd, err, out)
+		}
+		lastOut = out
+	}
+	return fmt.Errorf("%w: %q could not reach a required dependency after %d attempts (output: %s)",
+		errEnvUnavailable, cmd, reverifyNetworkRetries+1, lastOut)
 }
 
 // commitSummary collapses a verdict summary to a single short commit subject.
@@ -417,6 +496,24 @@ func buildReverifyAbortCommentBody(marker, failedCmd string) string {
 	} else {
 		fmt.Fprintln(&b, "- **Detail**: verify reported a fix but recorded no commands to re-run")
 	}
+	b.WriteString(commentFooter)
+	return b.String()
+}
+
+// buildReverifyUnavailableCommentBody reports that the tool's independent
+// re-run could not reach a required dependency (network/DNS), so the fix was
+// not published. This is distinct from buildReverifyAbortCommentBody: the fix
+// may well be correct — it simply could not be re-verified — so the wording
+// avoids implying the change itself failed.
+func buildReverifyUnavailableCommentBody(marker, failedCmd string) string {
+	var b strings.Builder
+	fmt.Fprintln(&b, marker)
+	fmt.Fprintln(&b, "## Claude auto-fix")
+	fmt.Fprintln(&b, "- **Verdict**: ⚠️ not re-verified — a required dependency was unreachable (no push)")
+	if failedCmd != "" {
+		fmt.Fprintf(&b, "- **Unreachable during**: `%s`\n", failedCmd)
+	}
+	fmt.Fprintln(&b, "- **Detail**: the fix could not be independently re-verified because a build/test dependency (a network/DNS endpoint) was unavailable. This is an environment issue, not a fix rejection — re-run once the dependency is reachable.")
 	b.WriteString(commentFooter)
 	return b.String()
 }

@@ -321,6 +321,12 @@ func tryFixCI(claudeBin, repo, marker string, cfg *Config, pr PR, checks []Check
 			logUnavailable = true
 			continue
 		}
+		if !runIsForHead(st.HeadSha, pr.HeadRefOid) {
+			fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf(
+				"auto-fix: run %s is for a superseded commit (run head %s, PR head %s); its failure may already be fixed — skipping",
+				id, shortSHA(st.HeadSha), shortSHA(pr.HeadRefOid))))
+			continue
+		}
 		if !strings.EqualFold(st.Status, "completed") || !isGenuineCIFailure(st.Conclusion) {
 			fmt.Fprintln(os.Stdout, sout.info(fmt.Sprintf(
 				"auto-fix: run %s not an actionable failure (status=%s conclusion=%s); skipping",

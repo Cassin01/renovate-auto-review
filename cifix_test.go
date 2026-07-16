@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func envNames(kvs []string) map[string]string {
@@ -532,6 +533,159 @@ func TestRunCIFixReverifyRejectsPublishVerb(t *testing.T) {
 		if argsMatch(c, "sh", "-c", "git push origin HEAD") {
 			t.Errorf("forbidden publish verb must not be executed: %v", c)
 		}
+	}
+}
+
+// setReverifyBackoff overrides the re-verification retry backoff for the
+// duration of a test (returned closure restores it), so retry paths run without
+// real delay. Tests using it are not run in parallel.
+func setReverifyBackoff(d time.Duration) func() {
+	prev := reverifyRetryBackoff
+	reverifyRetryBackoff = d
+	return func() { reverifyRetryBackoff = prev }
+}
+
+func TestIsTransientNetworkFailure(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"dns enotfound", "getaddrinfo ENOTFOUND federation-gateway.okane-kenko-alpha.jp", true},
+		{"eai_again", "getaddrinfo EAI_AGAIN registry.example.com", true},
+		{"econnrefused", "npm ERR! code ECONNREFUSED", true},
+		{"could not resolve host", "fatal: unable to access: Could not resolve host: github.com", true},
+		{"go dial timeout", "dial tcp 10.0.0.1:443: i/o timeout", true},
+		{"tls handshake timeout", "net/http: TLS handshake timeout", true},
+		{"compile error not transient", "src/x.ts(3,1): error TS2589: Type instantiation is excessively deep", false},
+		{"test failure not transient", "FAIL src/foo.spec.ts (1 failed)", false},
+		{"empty", "", false},
+		{"case insensitive", "Getaddrinfo EnotFound host", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTransientNetworkFailure(tc.in); got != tc.want {
+				t.Errorf("isTransientNetworkFailure(%q): want %v, got %v", tc.in, tc.want, got)
+			}
+		})
+	}
+}
+
+func TestReverifyRetriesTransientNetworkFailure(t *testing.T) {
+	defer setReverifyBackoff(0)()
+	var n int
+	rv := &fakeRunner{respond: func(call runnerCall) ([]byte, error) {
+		n++
+		if n == 1 {
+			return []byte("getaddrinfo ENOTFOUND federation-gateway.okane-kenko-alpha.jp"), errors.New("exit status 1")
+		}
+		return nil, nil
+	}}
+	failed, err := reverifyCommands(rv.run, t.TempDir(), []string{"npm run build"})
+	if err != nil {
+		t.Fatalf("transient network failure should be retried to success: failed=%q err=%v", failed, err)
+	}
+	got := 0
+	for _, c := range rv.calls {
+		if argsMatch(c, "sh", "-c", "npm run build") {
+			got++
+		}
+	}
+	if got != 2 {
+		t.Errorf("reverifyCommands: want 2 attempts (1 retry), got %d", got)
+	}
+}
+
+func TestReverifyDoesNotRetryRealFailure(t *testing.T) {
+	defer setReverifyBackoff(0)()
+	rv := &fakeRunner{respond: func(call runnerCall) ([]byte, error) {
+		return []byte("src/x.ts: error TS2589"), errors.New("exit status 2")
+	}}
+	failed, err := reverifyCommands(rv.run, t.TempDir(), []string{"npm run vue-tsc"})
+	if err == nil {
+		t.Fatal("reverifyCommands: real failure must return an error")
+	}
+	if errors.Is(err, errEnvUnavailable) {
+		t.Errorf("reverifyCommands: real failure must not be classified as env-unavailable: %v", err)
+	}
+	if failed != "npm run vue-tsc" {
+		t.Errorf("reverifyCommands: want failed cmd %q, got %q", "npm run vue-tsc", failed)
+	}
+	got := 0
+	for _, c := range rv.calls {
+		if argsMatch(c, "sh", "-c", "npm run vue-tsc") {
+			got++
+		}
+	}
+	if got != 1 {
+		t.Errorf("reverifyCommands: real failure must not retry: want 1 attempt, got %d", got)
+	}
+}
+
+func TestReverifyNetworkFailurePersists(t *testing.T) {
+	defer setReverifyBackoff(0)()
+	rv := &fakeRunner{respond: func(call runnerCall) ([]byte, error) {
+		return []byte("getaddrinfo ENOTFOUND host"), errors.New("exit status 1")
+	}}
+	failed, err := reverifyCommands(rv.run, t.TempDir(), []string{"npm run build"})
+	if err == nil {
+		t.Fatal("reverifyCommands: persistent network failure must return an error")
+	}
+	if !errors.Is(err, errEnvUnavailable) {
+		t.Errorf("reverifyCommands: persistent network failure must be env-unavailable: %v", err)
+	}
+	if failed != "npm run build" {
+		t.Errorf("reverifyCommands: want failed cmd %q, got %q", "npm run build", failed)
+	}
+	got := 0
+	for _, c := range rv.calls {
+		if argsMatch(c, "sh", "-c", "npm run build") {
+			got++
+		}
+	}
+	if got != reverifyNetworkRetries+1 {
+		t.Errorf("reverifyCommands: want %d attempts, got %d", reverifyNetworkRetries+1, got)
+	}
+}
+
+func TestBuildReverifyUnavailableCommentBody(t *testing.T) {
+	const marker = "<!-- m -->"
+	body := buildReverifyUnavailableCommentBody(marker, "npm run build")
+	for _, want := range []string{marker, "## Claude auto-fix", "npm run build", "environment", "github.com/Cassin01/renovate-auto-review"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("unavailable body missing %q\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "✅") {
+		t.Errorf("unavailable body must not claim success\n%s", body)
+	}
+}
+
+func TestRunCIFixReverifyNetworkUnavailableNoPush(t *testing.T) {
+	defer setReverifyBackoff(0)()
+	fr := &fakeRunner{respond: ciHappyResponder}
+	rv := &fakeRunner{respond: func(call runnerCall) ([]byte, error) {
+		return []byte("getaddrinfo ENOTFOUND federation-gateway.okane-kenko-alpha.jp"), errors.New("exit status 1")
+	}}
+	pr := PR{Number: 60, HeadRefName: "renovate/x"}
+	res, err := runCIFix(fr.run, rv.run, fixedVerifier(verifyVerdict{Verdict: "fixed", VerifiedCommands: []string{"npm run build"}}),
+		"o/r", "<!-- m -->", t.TempDir(), pr, "logs", nil, io.Discard)
+	if err == nil {
+		t.Fatalf("expected env-unavailable abort, got nil; res=%+v", res)
+	}
+	if !errors.Is(err, errEnvUnavailable) {
+		t.Errorf("expected env-unavailable error, got %v", err)
+	}
+	if res.Pushed {
+		t.Errorf("must not push when a required dependency is unreachable")
+	}
+	for _, c := range fr.calls {
+		if argsMatch(c, "git", "push") || argsMatch(c, "git", "commit") || argsMatch(c, "git", "add") {
+			t.Errorf("must not publish when re-verification cannot reach a dependency: %v", c)
+		}
+	}
+	if !hasCall(fr.calls, "gh", "pr", "comment") {
+		t.Errorf("env-unavailable abort must post a comment")
 	}
 }
 

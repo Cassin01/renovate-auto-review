@@ -156,12 +156,19 @@ Behavior:
 
 1. `gh pr view --json statusCheckRollup` detects failing checks; failing
    check `detailsUrl` values are scanned for Actions run IDs
-2. `gh run view <runID> --log-failed` fetches each failing job's logs
+2. Each run's live state is re-fetched (`gh api`) to re-validate the
+   possibly-lagging rollup. A run is skipped when it is not a genuine failure
+   (a re-run turned it green, or it was cancelled) **or when its `head_sha`
+   no longer matches the PR's current head** — the latter guards against the
+   rollup surfacing a superseded run whose failure an earlier push (e.g. a
+   prior auto-fix commit) has already fixed, which would otherwise waste a
+   cycle and report a misleading "nochange"
+3. `gh run view <runID> --log-failed` fetches each failing job's logs
    (tail-truncated to the last 50KB). If no run ID could be extracted,
    auto-fix is skipped without invoking Claude
-3. `os.MkdirTemp` (under `work_dir`, defaulting to `os.TempDir()`) creates
+4. `os.MkdirTemp` (under `work_dir`, defaulting to `os.TempDir()`) creates
    an isolated working directory; it is removed on exit via `defer os.RemoveAll`
-4. The tool clones and checks out the PR branch, then runs a **verify** phase:
+5. The tool clones and checks out the PR branch, then runs a **verify** phase:
    Claude (in a scoped environment, with commit/push/comment tools disabled)
    identifies the root cause, applies a minimal fix, and re-runs the failing
    CI job's **full step sequence** locally using the project's own commands
@@ -171,7 +178,7 @@ Behavior:
    files — so a fix that breaks a previously-green step is caught before push.
    It writes a verdict to `rar-verify-result.json` — including the exact
    `verified_commands` it ran and observed green — and prints `VERIFY_DONE`
-5. On a `fixed` verdict, the tool **re-runs each `verified_commands` entry
+6. On a `fixed` verdict, the tool **re-runs each `verified_commands` entry
    itself** (same scoped verify env, so lint/build/test reproduce what Claude
    saw) and refuses to publish unless all pass — turning the self-reported
    verdict into a machine-checked gate. It then stages tracked changes **plus
@@ -193,9 +200,13 @@ The verify phase enforces:
   the verdict can be `fixed`
 - A `fixed` verdict must list the exact `verified_commands` it ran; the tool
   re-runs them independently before pushing and aborts (→ `❌` comment, **no
-  push**) if any fails, is missing, or embeds a `git`/`gh` write verb. A command
-  that cannot be reproduced tool-side (e.g. needs unavailable network) fails the
-  gate — an unverified fix is never pushed
+  push**) if any fails, is missing, or embeds a `git`/`gh` write verb. An
+  unverified fix is never pushed. A failure whose output looks like an
+  unreachable dependency (DNS/connection error) — not a real lint/build/test
+  failure — is retried once; if it persists, the gate still refuses to push but
+  reports it as an environment issue (→ `⚠️` comment) rather than a fix
+  rejection, so a correct fix blocked by a transient network outage can be
+  re-run later
 
 The verdict is `unfixable` (→ `❌` comment, **no push**) when:
 
