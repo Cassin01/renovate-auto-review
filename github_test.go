@@ -289,6 +289,28 @@ func TestPickFailedRunIDs(t *testing.T) {
 	}
 }
 
+func TestRunIsForHead(t *testing.T) {
+	cases := []struct {
+		name       string
+		runHeadSha string
+		prHeadOid  string
+		want       bool
+	}{
+		{"same head", "abc123", "abc123", true},
+		{"superseded run", "old456", "new789", false},
+		{"run sha unknown", "", "new789", true},
+		{"pr head unknown", "abc123", "", true},
+		{"both unknown", "", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runIsForHead(tc.runHeadSha, tc.prHeadOid); got != tc.want {
+				t.Errorf("runIsForHead(%q, %q): want %v, got %v", tc.runHeadSha, tc.prHeadOid, tc.want, got)
+			}
+		})
+	}
+}
+
 func TestIsGenuineCIFailure(t *testing.T) {
 	cases := []struct {
 		conclusion string
