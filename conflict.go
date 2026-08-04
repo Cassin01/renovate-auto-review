@@ -41,7 +41,7 @@ func shouldRequestRebase(pr PR, cfg *Config, comments []Comment, commits []Commi
 // requestRebase attaches the rebase label and posts a marker comment recording
 // the request so subsequent runs stay idempotent.
 func requestRebase(repo string, cfg *Config, pr PR) error {
-	if err := addPRLabel(repo, pr.Number, cfg.RebaseLabel); err != nil {
+	if err := addPRLabel(defaultCommandRunner, repo, pr.Number, cfg.RebaseLabel); err != nil {
 		return err
 	}
 	body := buildRebaseRequestCommentBody(cfg.RebaseLabel)

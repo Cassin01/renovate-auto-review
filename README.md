@@ -274,6 +274,10 @@ a pure-conflict PR has no tool-pushed commits to wipe out — Renovate stays the
 branch owner. Claude's `allowedTools` still excludes `gh pr edit`; only the
 gated, opt-in orchestrator path adds the label.
 
+If the target repository does not define `rebase_label` yet, the orchestrator
+creates it there first (`gh pr edit --add-label` rejects an unknown label), then
+attaches it.
+
 The action is idempotent: it is skipped if the rebase label is already present
 (a request Renovate has not yet acted on) or if a previous **rebase-request**
 comment (marker `<!-- claude-auto-rebase-request -->`) is still waiting for a new

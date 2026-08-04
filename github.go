@@ -255,18 +255,46 @@ func prHasLabel(pr PR, name string) bool {
 	return false
 }
 
-// addPRLabel attaches a label to a PR. It is the orchestrator-driven trigger
-// for Renovate's rebase (Claude's allowedTools still excludes gh pr edit).
-func addPRLabel(repo string, prNumber int, label string) error {
-	out, err := exec.Command(
-		"gh", "pr", "edit", strconv.Itoa(prNumber),
-		"--repo", repo,
-		"--add-label", label,
-	).CombinedOutput()
-	if err != nil {
+// addPRLabel attaches a label to a PR, creating it in the repository first when
+// it does not exist there yet: `gh pr edit --add-label` rejects an unknown label
+// with "'<name>' not found", and Renovate's rebase label is absent from a
+// repository until someone defines it. It is the orchestrator-driven trigger for
+// Renovate's rebase (Claude's allowedTools still excludes gh pr edit).
+func addPRLabel(run commandRunner, repo string, prNumber int, label string) error {
+	add := func() ([]byte, error) {
+		return run("", "gh", "pr", "edit", strconv.Itoa(prNumber), "--repo", repo, "--add-label", label)
+	}
+
+	out, err := add()
+	if err == nil {
+		return nil
+	}
+	if !labelNotFound(out, label) {
 		return fmt.Errorf("gh pr edit --add-label: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
+
+	// A concurrent run may have created it in the meantime; that is a success,
+	// not a conflict.
+	if cout, cerr := run("", "gh", "label", "create", label, "--repo", repo); cerr != nil && !labelExists(cout) {
+		return fmt.Errorf("gh label create %s: %w (output: %s)", label, cerr, strings.TrimSpace(string(cout)))
+	}
+
+	out, err = add()
+	if err != nil {
+		return fmt.Errorf("gh pr edit --add-label after creating label %s: %w (output: %s)", label, err, strings.TrimSpace(string(out)))
+	}
 	return nil
+}
+
+// labelNotFound reports whether gh rejected the label because the repository
+// does not define it. The label name is required in the match so that an
+// unrelated "not found" (missing PR, missing repository) is not retried.
+func labelNotFound(out []byte, label string) bool {
+	return strings.Contains(string(out), "'"+label+"' not found")
+}
+
+func labelExists(out []byte) bool {
+	return strings.Contains(strings.ToLower(string(out)), "already exists")
 }
 
 // RunState is the current status/conclusion of a GitHub Actions run, fetched
