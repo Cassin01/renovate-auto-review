@@ -641,3 +641,118 @@ func TestPartialFailedLog(t *testing.T) {
 		})
 	}
 }
+
+func TestAddPRLabel(t *testing.T) {
+	const label = "rebase"
+	addFailedMissing := func(call runnerCall) ([]byte, error) {
+		if argsMatch(call, "gh", "pr", "edit") {
+			return []byte("'rebase' not found\n"), errors.New("exit status 1")
+		}
+		return nil, nil
+	}
+
+	cases := []struct {
+		name      string
+		respond   func(runnerCall) ([]byte, error)
+		wantErr   bool
+		wantCalls []string
+	}{
+		{
+			name:      "normal: label exists",
+			respond:   func(runnerCall) ([]byte, error) { return nil, nil },
+			wantCalls: []string{"gh pr edit 7 --repo o/r --add-label rebase"},
+		},
+		{
+			name: "label missing: create then retry",
+			respond: func() func(runnerCall) ([]byte, error) {
+				edits := 0
+				return func(call runnerCall) ([]byte, error) {
+					if argsMatch(call, "gh", "pr", "edit") {
+						edits++
+						if edits == 1 {
+							return []byte("'rebase' not found\n"), errors.New("exit status 1")
+						}
+					}
+					return nil, nil
+				}
+			}(),
+			wantCalls: []string{
+				"gh pr edit 7 --repo o/r --add-label rebase",
+				"gh label create rebase --repo o/r",
+				"gh pr edit 7 --repo o/r --add-label rebase",
+			},
+		},
+		{
+			name: "create reports the label already exists: retry anyway",
+			respond: func() func(runnerCall) ([]byte, error) {
+				edits := 0
+				return func(call runnerCall) ([]byte, error) {
+					switch {
+					case argsMatch(call, "gh", "label", "create"):
+						return []byte(`label with name "rebase" already exists`), errors.New("exit status 1")
+					case argsMatch(call, "gh", "pr", "edit"):
+						edits++
+						if edits == 1 {
+							return []byte("'rebase' not found\n"), errors.New("exit status 1")
+						}
+					}
+					return nil, nil
+				}
+			}(),
+			wantCalls: []string{
+				"gh pr edit 7 --repo o/r --add-label rebase",
+				"gh label create rebase --repo o/r",
+				"gh pr edit 7 --repo o/r --add-label rebase",
+			},
+		},
+		{
+			name: "create fails for another reason",
+			respond: func(call runnerCall) ([]byte, error) {
+				if argsMatch(call, "gh", "label", "create") {
+					return []byte("HTTP 403: Resource not accessible"), errors.New("exit status 1")
+				}
+				return addFailedMissing(call)
+			},
+			wantErr: true,
+			wantCalls: []string{
+				"gh pr edit 7 --repo o/r --add-label rebase",
+				"gh label create rebase --repo o/r",
+			},
+		},
+		{
+			name:    "retry after create still fails",
+			respond: addFailedMissing,
+			wantErr: true,
+			wantCalls: []string{
+				"gh pr edit 7 --repo o/r --add-label rebase",
+				"gh label create rebase --repo o/r",
+				"gh pr edit 7 --repo o/r --add-label rebase",
+			},
+		},
+		{
+			name: "unrelated failure is not treated as a missing label",
+			respond: func(call runnerCall) ([]byte, error) {
+				return []byte("no pull requests found for branch"), errors.New("exit status 1")
+			},
+			wantErr:   true,
+			wantCalls: []string{"gh pr edit 7 --repo o/r --add-label rebase"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fr := &fakeRunner{respond: tc.respond}
+			err := addPRLabel(fr.run, "o/r", 7, label)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("addPRLabel: want error %v, got %v", tc.wantErr, err)
+			}
+			var got []string
+			for _, c := range fr.calls {
+				got = append(got, c.String())
+			}
+			if !reflect.DeepEqual(got, tc.wantCalls) {
+				t.Errorf("addPRLabel calls: want %v, got %v", tc.wantCalls, got)
+			}
+		})
+	}
+}
