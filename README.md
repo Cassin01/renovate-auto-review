@@ -275,8 +275,12 @@ branch owner. Claude's `allowedTools` still excludes `gh pr edit`; only the
 gated, opt-in orchestrator path adds the label.
 
 The action is idempotent: it is skipped if the rebase label is already present
-(a request Renovate has not yet acted on) or if a marker comment was already
-posted with no newer commit since. A conflicting PR skips the merge-safety
+(a request Renovate has not yet acted on) or if a previous **rebase-request**
+comment (marker `<!-- claude-auto-rebase-request -->`) is still waiting for a new
+commit on the branch. That marker is deliberately separate from the review marker
+— a conflict is caused by the base branch moving, not by a PR commit, so gating
+on the review marker would suppress the request for any PR the tool had already
+commented on. A conflicting PR skips the merge-safety
 review for that run, and a freshly requested rebase skips the CI auto-fix path
 (the branch is about to change).
 

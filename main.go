@@ -208,8 +208,8 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool, prNum
 		}
 
 		rebaseRequested := false
-		if shouldRequestRebase(pr, cfg, comments, commits, marker) {
-			if err := requestRebase(repo, marker, cfg, pr); err != nil {
+		if shouldRequestRebase(pr, cfg, comments, commits) {
+			if err := requestRebase(repo, cfg, pr); err != nil {
 				log.Printf("%s #%d: request-rebase: %v", repo, pr.Number, err)
 				failed++
 			} else {

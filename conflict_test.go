@@ -7,9 +7,9 @@ import (
 )
 
 func TestShouldRequestRebase(t *testing.T) {
-	const marker = "<!-- rar -->"
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	markerComment := []Comment{{Body: marker + " requested rebase", CreatedAt: t0}}
+	rebaseComment := []Comment{{Body: rebaseRequestMarker + " requested rebase", CreatedAt: t0}}
+	reviewComment := []Comment{{Body: defaultMarker + "\n## Claude auto-fix", CreatedAt: t0}}
 
 	cases := []struct {
 		name     string
@@ -56,26 +56,54 @@ func TestShouldRequestRebase(t *testing.T) {
 			want: false,
 		},
 		{
-			name:     "marker present, no new commits since",
+			name:     "rebase request marker present, no new commits since",
 			cfg:      Config{AutoRebaseConflicts: true, RebaseLabel: "rebase"},
 			pr:       PR{Mergeable: "CONFLICTING"},
-			comments: markerComment,
+			comments: rebaseComment,
 			commits:  []Commit{{CommittedDate: t0.Add(-time.Hour)}},
 			want:     false,
 		},
 		{
-			name:     "marker present, newer commit",
+			name:     "rebase request marker present, newer commit",
 			cfg:      Config{AutoRebaseConflicts: true, RebaseLabel: "rebase"},
 			pr:       PR{Mergeable: "CONFLICTING"},
-			comments: markerComment,
+			comments: rebaseComment,
 			commits:  []Commit{{CommittedDate: t0.Add(time.Hour)}},
 			want:     true,
+		},
+		{
+			// Boundary: a commit at the same instant as the marker is not
+			// "since", so the request stays suppressed.
+			name:     "rebase request marker present, commit at the same instant",
+			cfg:      Config{AutoRebaseConflicts: true, RebaseLabel: "rebase"},
+			pr:       PR{Mergeable: "CONFLICTING"},
+			comments: rebaseComment,
+			commits:  []Commit{{CommittedDate: t0}},
+			want:     false,
+		},
+		{
+			// The review/auto-fix marker must not gate the rebase request: a
+			// conflict comes from the base branch moving, so requiring a newer
+			// PR commit would suppress the request indefinitely.
+			name:     "review marker present, no new commits since",
+			cfg:      Config{AutoRebaseConflicts: true, RebaseLabel: "rebase"},
+			pr:       PR{Mergeable: "CONFLICTING"},
+			comments: reviewComment,
+			commits:  []Commit{{CommittedDate: t0.Add(-time.Second)}},
+			want:     true,
+		},
+		{
+			name:     "rebase request marker present, no commits at all",
+			cfg:      Config{AutoRebaseConflicts: true, RebaseLabel: "rebase"},
+			pr:       PR{Mergeable: "CONFLICTING"},
+			comments: rebaseComment,
+			want:     false,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := shouldRequestRebase(tc.pr, &tc.cfg, tc.comments, tc.commits, marker)
+			got := shouldRequestRebase(tc.pr, &tc.cfg, tc.comments, tc.commits)
 			if got != tc.want {
 				t.Errorf("shouldRequestRebase: want %v, got %v", tc.want, got)
 			}
@@ -84,12 +112,14 @@ func TestShouldRequestRebase(t *testing.T) {
 }
 
 func TestBuildRebaseRequestCommentBody(t *testing.T) {
-	const marker = "<!-- rar -->"
-	body := buildRebaseRequestCommentBody(marker, "rebase")
+	body := buildRebaseRequestCommentBody("rebase")
 
 	firstLine, _, _ := strings.Cut(body, "\n")
-	if !strings.Contains(firstLine, marker) {
-		t.Errorf("buildRebaseRequestCommentBody: first line want marker %q, got %q", marker, firstLine)
+	if !strings.Contains(firstLine, rebaseRequestMarker) {
+		t.Errorf("buildRebaseRequestCommentBody: first line want marker %q, got %q", rebaseRequestMarker, firstLine)
+	}
+	if strings.Contains(body, defaultMarker) {
+		t.Errorf("buildRebaseRequestCommentBody: want no review marker %q in body, got %q", defaultMarker, body)
 	}
 	if !strings.Contains(body, "rebase") {
 		t.Errorf("buildRebaseRequestCommentBody: want label name %q in body, got %q", "rebase", body)
