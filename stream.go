@@ -10,7 +10,7 @@ import (
 
 // streamEvent is a partial view of one line of Claude's `--output-format
 // stream-json` output. Only the fields needed for progress rendering and
-// POSTED/PUSHED detection are decoded; everything else is ignored.
+// REVIEW_DONE/VERIFY_DONE detection are decoded; everything else is ignored.
 type streamEvent struct {
 	Type    string `json:"type"`
 	Message struct {
@@ -27,7 +27,7 @@ type streamEvent struct {
 
 // renderClaudeStream consumes Claude stream-json (JSONL) from r, writes a
 // human-readable progress trace to w as events arrive, and returns the text
-// used for POSTED/PUSHED/VERIFY_DONE detection (the final result event, or the
+// used for REVIEW_DONE/VERIFY_DONE detection (the final result event, or the
 // concatenated assistant text when no result event is present). Every printed
 // line is passed through red so credentials never reach w. Blank lines and
 // lines that are not valid JSON events are skipped.

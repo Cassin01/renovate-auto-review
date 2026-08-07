@@ -197,7 +197,7 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool, prNum
 			fmt.Fprintln(os.Stdout, sout.warn("review skip: marker present and no new commits since"))
 		default:
 			fmt.Fprintln(os.Stdout, sout.delim("--- claude output ---"))
-			err := runClaudeAutoMode(claudeBin, repo, pr.Number, marker, cfg.CustomPrompt, os.Stdout)
+			err := runClaudeAutoMode(claudeBin, repo, pr.Number, marker, cfg.CustomPrompt, cfg.WorkDir, os.Stdout)
 			fmt.Fprintln(os.Stdout, sout.delim("--- end ---"))
 			if err != nil {
 				log.Printf("%s #%d: %v", repo, pr.Number, err)
