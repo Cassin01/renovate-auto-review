@@ -5,7 +5,8 @@
 A Go script that enumerates open Renovate PRs from a GitHub repository
 specified on the command line. For each PR, it launches
 `claude --permission-mode auto` (Claude auto mode) so that Claude decides
-whether the PR is safe to merge and then posts a comment on GitHub.
+whether the PR is safe to merge and writes a review body; the tool then adds
+the duplicate-detection marker and footer and posts the comment on GitHub.
 
 ## Prerequisites
 
@@ -72,10 +73,11 @@ unchanged.
 custom_prompt = "Write the PR comment body in Japanese."
 ```
 
-The output protocol (the `POSTED` / `PUSHED` marker on the final line, the
-duplicate-detection HTML marker, and the `👷 Generated with renovate-auto-review`
-footer at the end of the comment body) is enforced after this section, so it
-cannot be accidentally overridden.
+The output protocol (the `REVIEW_DONE` / `VERIFY_DONE` marker on the final
+line) is enforced after this section, so it cannot be accidentally overridden.
+The duplicate-detection HTML marker and the `👷 Generated with
+renovate-auto-review` footer are not part of the prompt at all: the tool adds
+them mechanically to every comment body before posting.
 
 ## Usage
 
@@ -293,8 +295,6 @@ Both CI auto-fix and conflict handling are skipped under `-dry-run`.
 ## Known limitations
 
 - Claude CLI usage costs scale with the number of PRs
-- The `--permission-mode auto` classifier sometimes soft-denies
-  `gh pr comment`, so it is explicitly granted via `--allowedTools`
 - PRs are processed sequentially; parallel execution is not supported
 - The auto-fix flow cannot block `git push --force` family commands via the
   `allowedTools` prefix match, so it relies on the prompt's explicit prohibition

@@ -13,43 +13,41 @@ import (
 
 const commentFooter = "\n---\n👷 Generated with [renovate-auto-review](https://github.com/Cassin01/renovate-auto-review)\n"
 
+// reviewCommentFile is the file the review subprocess writes its comment body
+// to; the tool reads it, adds the marker and footer, and posts it.
+const reviewCommentFile = "rar-review-comment.md"
+
 const promptTemplate = `Target: %s PR #%d (Renovate auto-update)
 
-You are an experienced reviewer. Follow the steps below to analyze the PR and post a comment to GitHub at the end.
+You are an experienced reviewer. Follow the steps below to analyze the PR and write a review comment body to a file at the end. Do NOT post the comment yourself — the calling tool posts it after adding a duplicate-detection marker and a footer.
 
 1. Run ` + "`gh pr view %d --repo %s`" + ` to get the PR overview and status
 2. Run ` + "`gh pr diff %d --repo %s`" + ` to review the diff
 3. Run ` + "`gh pr checks %d --repo %s`" + ` to check CI results
 4. Decide whether the PR is safe to merge based on the above, and generate an English comment using the following template:
 
-%s
 ## Claude auto review
 - **Merge verdict**: (one of: ✅ safe / ⚠️ needs review / ❌ do not merge)
 - **Reason**: (2-4 lines of rationale)
 - **CI status**: (list PASS/FAIL/PENDING)
 - **Notes**: (only if any; otherwise write "none")
-` + commentFooter + `
-5. Post the generated comment via ` + "`gh pr comment %d --repo %s --body \"<comment body>\"`" + `
-   - For multi-line bodies, you may use ` + "`--body-file -`" + ` with a heredoc
+
+5. Write the comment body to ` + "`" + reviewCommentFile + "`" + ` in the working directory using the Write tool
 
 %sImportant:
-- The first line of the comment body MUST contain %s (duplicate-detection marker)
-- The footer block (starting with ` + "`---`" + `) MUST be included verbatim at the end of the comment body
+- The body MUST start with the ` + "`## Claude auto review`" + ` heading; do not add any marker or footer yourself — the calling tool adds them
 - When uncertain, choose ⚠️ needs review; avoid asserting "safe" without confidence
-- After a successful post, print only POSTED on the final output line
+- After writing the file, print only REVIEW_DONE on the final output line
 - No other explanatory output is needed
 `
 
-func buildPrompt(repo string, prNumber int, marker, customPrompt string) string {
+func buildPrompt(repo string, prNumber int, customPrompt string) string {
 	return fmt.Sprintf(promptTemplate,
 		repo, prNumber,
 		prNumber, repo,
 		prNumber, repo,
 		prNumber, repo,
-		marker,
-		prNumber, repo,
 		additionalInstructionsBlock(customPrompt),
-		marker,
 	)
 }
 
@@ -87,8 +85,14 @@ func runClaudeStreaming(cmd *exec.Cmd, out io.Writer, red *redactor) (string, er
 	return resultText, renderErr
 }
 
-func runClaudeAutoMode(claudeBin, repo string, prNumber int, marker, customPrompt string, out io.Writer) error {
-	prompt := buildPrompt(repo, prNumber, marker, customPrompt)
+func runClaudeAutoMode(claudeBin, repo string, prNumber int, marker, customPrompt, workDirBase string, out io.Writer) error {
+	workDir, err := os.MkdirTemp(workDirBase, fmt.Sprintf("rar-review-%d-", prNumber))
+	if err != nil {
+		return fmt.Errorf("mkdir workdir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(workDir) }()
+
+	prompt := buildPrompt(repo, prNumber, customPrompt)
 	cmd := exec.Command(
 		claudeBin,
 		"--permission-mode", "auto",
@@ -96,17 +100,40 @@ func runClaudeAutoMode(claudeBin, repo string, prNumber int, marker, customPromp
 		"--output-format", "stream-json",
 		"--verbose",
 		"--allowedTools",
-		"Bash(gh pr view:*) Bash(gh pr diff:*) Bash(gh pr checks:*) Bash(gh pr comment:*)",
+		"Bash(gh pr view:*) Bash(gh pr diff:*) Bash(gh pr checks:*) Write",
 		"-p", prompt,
 	)
+	cmd.Dir = workDir
 	resultText, err := runClaudeStreaming(cmd, out, newRedactor())
 	if err != nil {
 		return fmt.Errorf("claude exec failed for PR #%d: %w", prNumber, err)
 	}
-	if !strings.Contains(resultText, "POSTED") {
-		return fmt.Errorf("claude did not report POSTED for PR #%d", prNumber)
+	if !strings.Contains(resultText, "REVIEW_DONE") {
+		return fmt.Errorf("claude did not report REVIEW_DONE for PR #%d", prNumber)
+	}
+	return publishReviewComment(defaultCommandRunner, workDir, repo, prNumber, marker)
+}
+
+// publishReviewComment reads the review body written by the claude subprocess,
+// mechanically prepends the duplicate-detection marker and appends the footer,
+// and posts the result. Marker and footer never depend on prompt compliance.
+func publishReviewComment(run commandRunner, workDir, repo string, prNumber int, marker string) error {
+	data, err := os.ReadFile(filepath.Join(workDir, reviewCommentFile))
+	if err != nil {
+		return fmt.Errorf("read review comment: %w", err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return fmt.Errorf("review comment file %s is empty", reviewCommentFile)
+	}
+	body := buildReviewCommentBody(marker, string(data))
+	if err := postCommentViaFile(run, workDir, repo, prNumber, body); err != nil {
+		return fmt.Errorf("post review comment: %w", err)
 	}
 	return nil
+}
+
+func buildReviewCommentBody(marker, review string) string {
+	return marker + "\n" + strings.TrimSpace(review) + "\n" + commentFooter
 }
 
 // verifyResultFile is the JSON contract file the verify subprocess writes into
