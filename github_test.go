@@ -31,6 +31,56 @@ func TestIsRenovatePR(t *testing.T) {
 			want: true,
 		},
 		{
+			// Renovate's vulnerabilityAlerts.labels replaces (not merges) the
+			// repo-level labels, so security PRs can lack the renovate label.
+			name: "bot + only security label",
+			pr: PR{
+				Author: Author{IsBot: true, Login: renovateLogin},
+				Labels: []Label{{Name: "security"}},
+			},
+			want: true,
+		},
+		{
+			name: "bot + security label with different case",
+			pr: PR{
+				Author: Author{IsBot: true, Login: renovateLogin},
+				Labels: []Label{{Name: "Security"}},
+			},
+			want: false,
+		},
+		{
+			name: "security label but other bot",
+			pr: PR{
+				Author: Author{IsBot: true, Login: "app/dependabot"},
+				Labels: []Label{{Name: "security"}},
+			},
+			want: false,
+		},
+		{
+			name: "security label but human author",
+			pr: PR{
+				Author: Author{IsBot: false, Login: "someone"},
+				Labels: []Label{{Name: "security"}},
+			},
+			want: false,
+		},
+		{
+			name: "security label but non-bot impersonating renovate login",
+			pr: PR{
+				Author: Author{IsBot: false, Login: renovateLogin},
+				Labels: []Label{{Name: "security"}},
+			},
+			want: false,
+		},
+		{
+			name: "bot + empty labels",
+			pr: PR{
+				Author: Author{IsBot: true, Login: renovateLogin},
+				Labels: []Label{},
+			},
+			want: false,
+		},
+		{
 			name: "bot but no renovate label",
 			pr: PR{
 				Author: Author{IsBot: true, Login: renovateLogin},

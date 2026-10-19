@@ -117,7 +117,14 @@ single PR; if that PR is not a Renovate PR it is skipped.
 A PR is considered a Renovate PR when both of the following are true:
 
 1. `author.is_bot == true` and `author.login == "app/renovate"`
-2. The PR labels include `renovate`
+2. The PR labels include `renovate` or `security`
+
+`security` is accepted because Renovate's vulnerability-fix PRs are commonly
+configured with `vulnerabilityAlerts.labels: ["security"]`, and `labels` is
+non-mergeable in Renovate: that list *replaces* the repository-level
+`labels: ["renovate"]`, so those PRs carry only `security`. The label never
+proves who opened the PR (anyone with triage permission can add it); rule 1
+does, since the `app/renovate` GitHub App login cannot be used by anyone else.
 
 ## Review skip rules
 

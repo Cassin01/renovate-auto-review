@@ -43,6 +43,12 @@ type Commit struct {
 const renovateLogin = "app/renovate"
 const renovateLabel = "renovate"
 
+// securityLabel is what Renovate's vulnerabilityAlerts PRs commonly carry
+// instead of renovateLabel: vulnerabilityAlerts.labels replaces the repo-level
+// labels list rather than merging into it. It is only trusted together with
+// the renovateLogin author check, since anyone with triage can add a label.
+const securityLabel = "security"
+
 func listOpenPRs(repo string, limit int) ([]PR, error) {
 	out, err := exec.Command(
 		"gh", "pr", "list",
@@ -89,7 +95,7 @@ func isRenovatePR(pr PR) bool {
 		return false
 	}
 	for _, l := range pr.Labels {
-		if l.Name == renovateLabel {
+		if l.Name == renovateLabel || l.Name == securityLabel {
 			return true
 		}
 	}
