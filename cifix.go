@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os/exec"
 	"path"
 	"regexp"
@@ -358,6 +359,20 @@ var reverifyPrograms = map[string][]string{
 	"yarn": {"run", "test", "install"},
 	"mise": {"run"},
 	"make": nil,
+}
+
+// describeReverifyAllowlist renders reverifyPrograms for the verify prompt, so
+// the commands Claude is told to record are the ones the gate accepts.
+func describeReverifyAllowlist() string {
+	entries := make([]string, 0, len(reverifyPrograms))
+	for _, prog := range slices.Sorted(maps.Keys(reverifyPrograms)) {
+		if subs := reverifyPrograms[prog]; subs != nil {
+			entries = append(entries, "`"+prog+" "+strings.Join(subs, "|")+"`")
+		} else {
+			entries = append(entries, "`"+prog+" [args]`")
+		}
+	}
+	return strings.Join(entries, ", ")
 }
 
 // reverifyTokenRe admits no shell syntax. Commands run without a shell, so a
