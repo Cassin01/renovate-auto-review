@@ -42,8 +42,9 @@ The CI auto-fix flow is **phase-split for token safety**: a verify phase
 (tool-driven, registry-token env stripped, staged-add with structural guards —
 untracked-directory skip + credential-name denylist — backed by the staged-diff
 secret scan, secret-scan abort). Between them is a **re-verification gate**: the tool
-independently re-runs the `verified_commands` Claude reported green (scoped
-verify env, `git`/`gh` write verbs rejected) and refuses to publish unless all
+independently re-runs the `verified_commands` Claude reported green (no shell,
+program/subcommand allowlist, verify env minus `gh`/Anthropic/AWS credentials)
+and refuses to publish unless all
 pass — the self-reported `fixed` verdict is not trusted on its own. A private
 registry token is supplied via the environment only — never a config field. See
 `README.md` for the security model.

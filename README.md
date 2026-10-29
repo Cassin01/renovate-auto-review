@@ -188,9 +188,12 @@ Behavior:
    It writes a verdict to `rar-verify-result.json` — including the exact
    `verified_commands` it ran and observed green — and prints `VERIFY_DONE`
 6. On a `fixed` verdict, the tool **re-runs each `verified_commands` entry
-   itself** (same scoped verify env, so lint/build/test reproduce what Claude
-   saw) and refuses to publish unless all pass — turning the self-reported
-   verdict into a machine-checked gate. It then stages tracked changes **plus
+   itself** and refuses to publish unless all pass — turning the self-reported
+   verdict into a machine-checked gate. Entries run **without a shell**, must
+   match a fixed allowlist (`go build|test|vet`, `npm run|run-script|test|ci`,
+   `pnpm run|test|install`, `yarn run|test|install`, `mise run`, `make`,
+   optionally prefixed by `NAME=value` assignments), and run in the verify env
+   **minus** the `GH_*`/`GITHUB_*`/`ANTHROPIC_*`/`CLAUDE_*`/`AWS_*` credentials. It then stages tracked changes **plus
    newly-created files** (skipping untracked directories and credential-named
    files such as `.npmrc`/`.env*`/`.netrc`/`.git-credentials`), scans the staged
    diff and comment body for secrets, then commits as
@@ -209,7 +212,9 @@ The verify phase enforces:
   the verdict can be `fixed`
 - A `fixed` verdict must list the exact `verified_commands` it ran; the tool
   re-runs them independently before pushing and aborts (→ `❌` comment, **no
-  push**) if any fails, is missing, or embeds a `git`/`gh` write verb. An
+  push**) if any fails, is missing, uses shell syntax, or falls outside the
+  re-verification allowlist (so `git`, `gh`, `curl`, `npx`, `npm publish` and
+  the like are never executed). An
   unverified fix is never pushed. A failure whose output looks like an
   unreachable dependency (DNS/connection error) — not a real lint/build/test
   failure — is retried once; if it persists, the gate still refuses to push but
@@ -244,9 +249,17 @@ kept from leaking by two layers:
    phase. Verify receives a scoped allowlist of env vars (tooling baseline +
    `gh`/Anthropic vars + the registry-token vars) so `npm ci` works, but it
    cannot commit/push/comment. The publish-time **re-verification** of
-   `verified_commands` reuses the same scoped env (token present) but only
-   re-runs read-only lint/build/test — `git`/`gh` write verbs are rejected
-   before execution, so the token never reaches a publish operation through it.
+   `verified_commands` keeps the registry token but drops the `gh`/Anthropic/
+   AWS vars, and executes only allowlisted lint/build/test commands without a
+   shell — `git`, `gh`, network clients, and publish/exec subcommands are
+   rejected before execution.
+   *Ceiling:* those commands still execute repository code (npm scripts,
+   Makefile recipes, tests — including Claude's edits) as your OS user, which
+   can reach the registry token in its env and credentials stored on disk or in
+   the keychain (`gh` keyring, git credential helper, `~/.aws`). Full isolation
+   needs an OS-level sandbox (container, `sandbox-exec`), which this tool does
+   not provide; run auto-fix on a machine/account whose stored credentials you
+   accept that exposure for.
    Publish itself runs with the registry-token vars **stripped**, never invokes
    a package manager, and stages tracked changes plus newly-created files —
    excluding untracked directories and credential-named files (`.npmrc`,

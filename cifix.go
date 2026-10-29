@@ -6,6 +6,7 @@ import (
 	"io"
 	"os/exec"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -121,6 +122,29 @@ func buildVerifyEnv(environ []string) []string {
 	return out
 }
 
+// reverifyEnvDenyPrefixes are the credential families the verify env forwards
+// only so claude and gh can run. The re-verification commands are plain
+// lint/build/test re-runs and need neither.
+var reverifyEnvDenyPrefixes = []string{"ANTHROPIC_", "CLAUDE_", "AWS_", "GH_", "GITHUB_"}
+
+func reverifyEnvDenied(name string) bool {
+	for _, p := range reverifyEnvDenyPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildReverifyEnv returns the verify env minus the claude/gh/AWS credential
+// families. The registry-token vars stay so `npm ci` can still resolve
+// `${NODE_AUTH_TOKEN}`.
+func buildReverifyEnv(environ []string) []string {
+	return slices.DeleteFunc(buildVerifyEnv(environ), func(kv string) bool {
+		return reverifyEnvDenied(envName(kv))
+	})
+}
+
 // buildPublishEnv returns environ with every registry-token var removed, so the
 // commit/push/comment phase cannot read the token.
 func buildPublishEnv(environ []string) []string {
@@ -181,11 +205,11 @@ type ciFixResult struct {
 //	                   commit/push/comment under a token-stripped runner.
 //
 // run is the publish runner (token-stripped). reverify runs the re-verification
-// commands with the scoped verify env (registry token present, like Phase 1) so
-// lint/build/test reproduce what claude observed; it never performs git/gh
-// writes. verifyEnv is the scoped env for the verify subprocess. A push only
-// happens for a "fixed" verdict whose reported commands all re-run green and
-// whose staged diff is secret-free.
+// commands with buildReverifyEnv (registry token present, claude/gh/AWS
+// credentials absent); each command must pass parseReverifyCommand and runs
+// without a shell. verifyEnv is the scoped env for the verify subprocess. A
+// push only happens for a "fixed" verdict whose reported commands all re-run
+// green and whose staged diff is secret-free.
 func runCIFix(run, reverify commandRunner, verify claudeVerifier, repo, marker, workDir string, pr PR, logs string, verifyEnv []string, out io.Writer) (*ciFixResult, error) {
 	res := &ciFixResult{}
 
@@ -322,28 +346,61 @@ func stageablePaths(porcelain string) []string {
 	return paths
 }
 
-// publishVerbPatterns are subcommand signatures that mutate the remote or the
-// commit graph. A re-verification command must be a read-only re-run
-// (lint/build/test), so any match is rejected before execution — the
-// reverify runner carries the registry token, and these must never reach it.
-var publishVerbPatterns = []string{
-	"git add", "git commit", "git push", "git rebase", "git reset",
-	"git merge", "git cherry-pick", "git tag", "git fetch", "git pull",
-	"gh pr comment", "gh pr edit", "gh pr merge", "gh release", "gh api",
+// reverifyPrograms is the positive allowlist for re-verification commands: the
+// toolchain the verify phase is pre-approved to run (verifyAllowedTools), each
+// limited to the subcommands that lint/build/test. A nil list allows any
+// arguments. Anything else — git, gh, curl, npx, publish/exec subcommands — is
+// rejected before execution.
+var reverifyPrograms = map[string][]string{
+	"go":   {"build", "test", "vet"},
+	"npm":  {"run", "run-script", "test", "ci"},
+	"pnpm": {"run", "test", "install"},
+	"yarn": {"run", "test", "install"},
+	"mise": {"run"},
+	"make": nil,
 }
 
-// containsPublishVerb reports whether a shell command embeds a write verb. It
-// normalizes interior whitespace so `git  commit` matches; it is defense in
-// depth, not the primary boundary (the verify subprocess already runs under an
-// allowlist that omits these verbs).
-func containsPublishVerb(cmd string) bool {
-	norm := strings.Join(strings.Fields(cmd), " ")
-	for _, p := range publishVerbPatterns {
-		if strings.Contains(norm, p) {
-			return true
+// reverifyTokenRe admits no shell syntax. Commands run without a shell, so a
+// command written for one (quotes, &&, pipes, $VAR) is rejected rather than
+// silently executed with different meaning.
+var reverifyTokenRe = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+var envAssignRe = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)=`)
+
+// parseReverifyCommand validates cmd against the allowlist and returns the
+// argv to hand to env(1): leading NAME=value assignments, then the program and
+// its arguments.
+func parseReverifyCommand(cmd string) ([]string, error) {
+	argv := strings.Fields(cmd)
+	if len(argv) == 0 {
+		return nil, errors.New("empty command")
+	}
+	for _, tok := range argv {
+		if !reverifyTokenRe.MatchString(tok) {
+			return nil, errors.New("shell syntax is not allowed")
 		}
 	}
-	return false
+	i := 0
+	for ; i < len(argv); i++ {
+		m := envAssignRe.FindStringSubmatch(argv[i])
+		if m == nil {
+			break
+		}
+		if m[1] == "PATH" || reverifyEnvDenied(m[1]) {
+			return nil, fmt.Errorf("assignment to %s is not allowed", m[1])
+		}
+	}
+	if i == len(argv) {
+		return nil, errors.New("no program to run")
+	}
+	subcommands, ok := reverifyPrograms[argv[i]]
+	if !ok {
+		return nil, fmt.Errorf("program %q is not allowed", argv[i])
+	}
+	if subcommands != nil && (i+1 == len(argv) || !slices.Contains(subcommands, argv[i+1])) {
+		return nil, fmt.Errorf("%s: allowed subcommands are %s", argv[i], strings.Join(subcommands, ", "))
+	}
+	return argv, nil
 }
 
 // errEnvUnavailable marks a re-verification failure caused by an unreachable
@@ -404,14 +461,17 @@ func reverifyCommands(reverify commandRunner, workDir string, cmds []string) (st
 	if len(cmds) == 0 {
 		return "", fmt.Errorf("verify reported \"fixed\" but recorded no verified_commands to re-run")
 	}
-	for _, cmd := range cmds {
-		if containsPublishVerb(cmd) {
-			return cmd, fmt.Errorf("verified_commands contains a forbidden publish verb: %q", cmd)
+	argvs := make([][]string, len(cmds))
+	for i, cmd := range cmds {
+		argv, err := parseReverifyCommand(cmd)
+		if err != nil {
+			return cmd, fmt.Errorf("verified_commands entry rejected: %q: %w", cmd, err)
 		}
+		argvs[i] = argv
 	}
-	for _, cmd := range cmds {
-		if err := runReverifyCommand(reverify, workDir, cmd); err != nil {
-			return cmd, err
+	for i, argv := range argvs {
+		if err := runReverifyCommand(reverify, workDir, cmds[i], argv); err != nil {
+			return cmds[i], err
 		}
 	}
 	return "", nil
@@ -422,13 +482,13 @@ func reverifyCommands(reverify commandRunner, workDir string, cmds []string) (st
 // network/DNS problem is retried up to reverifyNetworkRetries times; if it
 // still fails that way, the error wraps errEnvUnavailable so the caller reports
 // it as an environment issue rather than a fix rejection.
-func runReverifyCommand(reverify commandRunner, workDir, cmd string) error {
+func runReverifyCommand(reverify commandRunner, workDir, cmd string, argv []string) error {
 	var lastOut string
 	for attempt := 0; attempt <= reverifyNetworkRetries; attempt++ {
 		if attempt > 0 {
 			time.Sleep(reverifyRetryBackoff)
 		}
-		o, err := reverify(workDir, "sh", "-c", cmd)
+		o, err := reverify(workDir, "env", argv...)
 		if err == nil {
 			return nil
 		}
