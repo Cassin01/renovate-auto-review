@@ -162,13 +162,13 @@ const verifyPromptTemplate = `Target: %s PR #%d (Renovate auto-update). The PR b
 %s
 ---
 2. Determine the project's actual lint/test/build commands from its CI config and manifests — do NOT assume Go. Inspect ` + "`.github/workflows`" + `, ` + "`package.json`" + ` scripts, ` + "`Makefile`" + `, or equivalent. The failure log above shows only the FIRST failing step (CI stops on first error), so enumerate EVERY step of the failing job in order — not just the one in the log — because earlier steps must still pass and later steps may also be broken
-3. Apply a minimal source fix, then re-run the failing job's full step sequence in order, and require every step to pass. A fix edit can break a previously-passing step — in particular, run the project's formatter and linter (e.g. ` + "`prettier --check`/`--write`" + `, ` + "`eslint`" + `, ` + "`stylelint`" + `, ` + "`gofmt`" + `) over the files you edited and leave them clean. You MUST observe every step of the failing job green locally before declaring the fix verified. If a step cannot finish in the foreground within the 10-minute command timeout (e.g. a full test suite), run the tests scoped to the packages affected by this PR instead — those scoped commands are what you record in verified_commands
+3. Apply a minimal source fix, then re-run the failing job's full step sequence in order, and require every step to pass. A fix edit can break a previously-passing step — in particular, run the project's formatter and linter over the files you edited and leave them clean — preferably through its own scripts or make targets (e.g. ` + "`npm run lint`" + `, ` + "`make lint`" + `), otherwise directly (e.g. ` + "`prettier --check`/`--write`" + `, ` + "`eslint`" + `, ` + "`stylelint`" + `, ` + "`gofmt`" + `). You MUST observe every step of the failing job green locally before declaring the fix verified. If a step cannot finish in the foreground within the 10-minute command timeout (e.g. a full test suite), run the tests scoped to the packages affected by this PR instead — those scoped commands are what you record in verified_commands
 4. Write a JSON file ` + "`%s`" + ` in the working directory:
    {"verdict":"fixed|unfixable|nochange","summary":"<1-2 lines>","failing_checks":["..."],"suspected_cause":"<1-2 lines>","verified_commands":["<cmd>", "..."]}
    - "fixed": the failing step now passes locally after your change
    - "nochange": no source change was needed
    - "unfixable": see Fallback below
-   - "verified_commands" (REQUIRED when verdict is "fixed"): the exact shell commands you ran and observed exit 0, in execution order. The calling tool re-runs each independently and will refuse to publish unless all pass, so each MUST be self-contained and re-runnable from the working directory with no extra setup — embed any required env inline (e.g. ` + "`GRAPHQL_ENDPOINT=https://... npm run build`" + `). Record only read-only lint/build/test commands; never a ` + "`git`" + ` or ` + "`gh`" + ` write
+   - "verified_commands" (REQUIRED when verdict is "fixed"): the exact shell commands you ran and observed exit 0, in execution order. The calling tool re-runs each independently, WITHOUT a shell and without GitHub/Anthropic/AWS credentials, and will refuse to publish unless all pass, so each MUST be self-contained and re-runnable from the working directory with no extra setup — embed any required env inline (e.g. ` + "`GRAPHQL_ENDPOINT=https://... npm run build`" + `). Each entry MUST have the form ` + "`[NAME=value ...] <program> <subcommand> [args...]`" + ` using only: %s. No shell syntax (quotes, ` + "`&&`" + `, pipes, ` + "`;`" + `, ` + "`$VAR`" + `, globs). Run and record scripts as ` + "`npm run lint`" + ` / ` + "`yarn run lint`" + `, not ` + "`npx eslint`" + ` or ` + "`yarn lint`" + ` — any other entry is rejected and the fix is not published. A step that has no such form (e.g. ` + "`gofmt -l`" + `, ` + "`golangci-lint run`" + `, ` + "`npx prettier --check`" + `) must still be run and pass; record the project's equivalent script or make target instead if one exists, otherwise leave that step out of verified_commands — CI re-checks it after the push
 
 [Fallback — set verdict "unfixable"]
 - A major breaking change is required (e.g. an API-incompatible library upgrade)
@@ -187,6 +187,7 @@ func buildVerifyPrompt(repo string, prNumber int, workDir, logsExcerpt, customPr
 		workDir,
 		logsExcerpt,
 		verifyResultFile,
+		describeReverifyAllowlist(),
 		additionalInstructionsBlock(customPrompt),
 		verifyResultFile,
 	)

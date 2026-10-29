@@ -265,9 +265,23 @@ func TestBuildVerifyPrompt(t *testing.T) {
 				"Do NOT run any command in the background",
 				"foreground with an explicit timeout",
 				"scoped to the packages affected by this PR",
+				"WITHOUT a shell",
+				"leave that step out of verified_commands",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("expected substring %q not found", want)
+				}
+			}
+
+			// The prompt must advertise exactly the re-verification allowlist,
+			// so Claude records commands the gate will accept.
+			for prog, subs := range reverifyPrograms {
+				want := "`" + prog
+				if subs != nil {
+					want += " " + strings.Join(subs, "|") + "`"
+				}
+				if !strings.Contains(got, want) {
+					t.Errorf("buildVerifyPrompt: want allowlist entry %q, not found", want)
 				}
 			}
 
