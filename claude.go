@@ -92,17 +92,7 @@ func runClaudeAutoMode(claudeBin, repo string, prNumber int, marker, customPromp
 	}
 	defer func() { _ = os.RemoveAll(workDir) }()
 
-	prompt := buildPrompt(repo, prNumber, customPrompt)
-	cmd := exec.Command(
-		claudeBin,
-		"--permission-mode", "auto",
-		"--print",
-		"--output-format", "stream-json",
-		"--verbose",
-		"--allowedTools",
-		"Bash(gh pr view:*) Bash(gh pr diff:*) Bash(gh pr checks:*) Write",
-		"-p", prompt,
-	)
+	cmd := exec.Command(claudeBin, reviewClaudeArgs(buildPrompt(repo, prNumber, customPrompt))...)
 	cmd.Dir = workDir
 	resultText, err := runClaudeStreaming(cmd, out, newRedactor())
 	if err != nil {
@@ -147,6 +137,7 @@ const verifyPromptTemplate = `Target: %s PR #%d (Renovate auto-update). The PR b
 - Do NOT run ` + "`git add`" + `, ` + "`git commit`" + `, ` + "`git push`" + `, or ` + "`gh pr comment`" + ` — these are disabled and performed by the calling tool
 - Do not use ` + "`git commit --amend`" + ` / ` + "`git rebase`" + ` / ` + "`git reset --hard`" + ` / ` + "`git push --force`" + ` / ` + "`--force-with-lease`" + `
 - Do not use ` + "`gh pr edit`" + `
+- Only pre-approved commands run; anything else (e.g. ` + "`gh api`" + `, ` + "`go run`" + `, ` + "`npm exec`" + `, ` + "`curl`" + `) is refused. Do not edit ` + "`.git/config`" + ` or anything in ` + "`.git/hooks`" + ` — the calling tool refuses to publish if ` + "`.git/config`" + ` or ` + "`.git/hooks`" + ` changed
 - This is a one-shot headless session: ending your turn while a command is still running terminates the session immediately and discards the fix. Do NOT run any command in the background and do NOT end your turn to wait for one — run long commands in the foreground with an explicit timeout (up to 10 minutes) and wait for them to finish
 - Do not attempt major breaking changes to dependencies (only minor type fixes, test adjustments, lockfile regeneration)
 - Keep manifest/lockfile edits minimal. For Go, add only the ` + "`go.sum`" + `/` + "`go.mod`" + ` entries the build needs (e.g. ` + "`go mod download <module>`" + ` or ` + "`go get <pkg>@<version>`" + `); do NOT run a repo-wide ` + "`go mod tidy`" + ` that prunes unrelated unused modules — pruning collides with concurrent dependency PRs and causes merge conflicts. Touch only the require/checksum lines for the dependency this PR is about
@@ -162,7 +153,7 @@ const verifyPromptTemplate = `Target: %s PR #%d (Renovate auto-update). The PR b
 %s
 ---
 2. Determine the project's actual lint/test/build commands from its CI config and manifests — do NOT assume Go. Inspect ` + "`.github/workflows`" + `, ` + "`package.json`" + ` scripts, ` + "`Makefile`" + `, or equivalent. The failure log above shows only the FIRST failing step (CI stops on first error), so enumerate EVERY step of the failing job in order — not just the one in the log — because earlier steps must still pass and later steps may also be broken
-3. Apply a minimal source fix, then re-run the failing job's full step sequence in order, and require every step to pass. A fix edit can break a previously-passing step — in particular, run the project's formatter and linter over the files you edited and leave them clean — preferably through its own scripts or make targets (e.g. ` + "`npm run lint`" + `, ` + "`make lint`" + `), otherwise directly (e.g. ` + "`prettier --check`/`--write`" + `, ` + "`eslint`" + `, ` + "`stylelint`" + `, ` + "`gofmt`" + `). You MUST observe every step of the failing job green locally before declaring the fix verified. If a step cannot finish in the foreground within the 10-minute command timeout (e.g. a full test suite), run the tests scoped to the packages affected by this PR instead — those scoped commands are what you record in verified_commands
+3. Apply a minimal source fix, then re-run the failing job's full step sequence in order, and require every step to pass. A fix edit can break a previously-passing step — in particular, run the project's formatter and linter over the files you edited and leave them clean — preferably through its own scripts or make targets (e.g. ` + "`npm run lint`" + `, ` + "`make lint`" + `), otherwise directly (e.g. ` + "`npx prettier --check`/`--write`" + `, ` + "`npx eslint`" + `, ` + "`npx stylelint`" + `, ` + "`gofmt`" + `, ` + "`golangci-lint run`" + `). You MUST observe every step of the failing job green locally before declaring the fix verified. If a step cannot finish in the foreground within the 10-minute command timeout (e.g. a full test suite), run the tests scoped to the packages affected by this PR instead — those scoped commands are what you record in verified_commands
 4. Write a JSON file ` + "`%s`" + ` in the working directory:
    {"verdict":"fixed|unfixable|nochange","summary":"<1-2 lines>","failing_checks":["..."],"suspected_cause":"<1-2 lines>","verified_commands":["<cmd>", "..."]}
    - "fixed": the failing step now passes locally after your change
@@ -193,30 +184,62 @@ func buildVerifyPrompt(repo string, prNumber int, workDir, logsExcerpt, customPr
 	)
 }
 
-// verifyAllowedTools is fixAllowedTools minus every publish verb (git add/
-// commit/push, gh pr comment). The verify subprocess is structurally unable to
-// publish even if the prompt is subverted.
-const verifyAllowedTools = "Bash(gh pr view:*) Bash(gh pr diff:*) Bash(gh pr checks:*) " +
-	"Bash(gh run view:*) Bash(gh api:*) " +
-	"Bash(git status:*) Bash(git diff:*) Bash(git log:*) Bash(git fetch:*) " +
-	"Bash(git checkout:*) Bash(git remote:*) Bash(git show:*) " +
-	"Bash(go:*) Bash(make:*) Bash(npm:*) Bash(pnpm:*) Bash(yarn:*) Bash(mise:*) " +
-	"Bash(ls:*) Bash(cat:*) Bash(rg:*) Bash(fd:*) " +
+// deniedTools are refused in every claude subprocess: GitHub writes, git
+// publish/remote/config verbs, package publishing, and network clients. Deny
+// rules win over --allowedTools and over allow rules merged in from the user's
+// or the target repo's settings, so this holds regardless of local config.
+const deniedTools = "Bash(gh api:*) Bash(gh pr comment:*) Bash(gh pr edit:*) Bash(gh pr merge:*) " +
+	"Bash(gh pr review:*) Bash(gh pr close:*) Bash(gh issue:*) Bash(gh gist:*) Bash(gh release:*) " +
+	"Bash(gh repo:*) Bash(gh secret:*) Bash(gh auth:*) Bash(gh workflow:*) " +
+	"Bash(git push:*) Bash(git commit:*) Bash(git add:*) Bash(git remote:*) Bash(git config:*) " +
+	"Bash(git rebase:*) Bash(git reset:*) " +
+	"Bash(npm publish:*) Bash(pnpm publish:*) Bash(yarn publish:*) Bash(yarn npm:*) " +
+	"Bash(curl:*) Bash(wget:*) WebFetch WebSearch"
+
+const reviewAllowedTools = "Bash(gh pr view:*) Bash(gh pr diff:*) Bash(gh pr checks:*) Write"
+
+// verifyAllowedTools is the complete tool set of the verify subprocess (it runs
+// in dontAsk mode, so anything unlisted is refused): read-only gh/git, the
+// lint/build/test verbs the verify prompt asks for, and file tools. It has no
+// publish verb and no general exec subcommand (go run, npm exec, rg --pre).
+// Edit plus a build/test command still executes arbitrary code; see README.
+const verifyAllowedTools = "Bash(gh pr view:*) Bash(gh pr diff:*) Bash(gh pr checks:*) Bash(gh run view:*) " +
+	"Bash(git status:*) Bash(git diff:*) Bash(git log:*) Bash(git show:*) Bash(git fetch:*) Bash(git checkout:*) " +
+	"Bash(go build:*) Bash(go test:*) Bash(go vet:*) Bash(go list:*) Bash(go mod download:*) " +
+	"Bash(go get:*) Bash(go version:*) Bash(gofmt:*) Bash(golangci-lint:*) " +
+	"Bash(npm ci:*) Bash(npm install:*) Bash(npm run:*) Bash(npm test:*) Bash(npm ls:*) " +
+	"Bash(pnpm install:*) Bash(pnpm run:*) Bash(pnpm test:*) " +
+	"Bash(yarn install:*) Bash(yarn run:*) Bash(yarn test:*) " +
+	"Bash(npx prettier:*) Bash(npx eslint:*) Bash(npx stylelint:*) " +
+	"Bash(make:*) Bash(mise run:*) Bash(mise install:*) Bash(ls:*) Bash(cat:*) " +
 	"Read Write Edit Glob Grep"
+
+func reviewClaudeArgs(prompt string) []string {
+	return claudeArgs(reviewAllowedTools, prompt)
+}
+
+func verifyClaudeArgs(prompt string) []string {
+	return claudeArgs(verifyAllowedTools, prompt)
+}
+
+// claudeArgs uses dontAsk rather than auto: auto lets a classifier approve
+// tools outside allowedTools, so the list would not be a boundary.
+func claudeArgs(allowed, prompt string) []string {
+	return []string{
+		"--permission-mode", "dontAsk",
+		"--print",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--allowedTools", allowed,
+		"--disallowedTools", deniedTools,
+		"-p", prompt,
+	}
+}
 
 // runClaudeVerify is the default claudeVerifier: it runs the constrained verify
 // subprocess with the scoped env and returns the parsed verdict file.
 func runClaudeVerify(claudeBin, repo string, prNumber int, workDir, logs, customPrompt string, env []string, out io.Writer) (verifyVerdict, error) {
-	prompt := buildVerifyPrompt(repo, prNumber, workDir, logs, customPrompt)
-	cmd := exec.Command(
-		claudeBin,
-		"--permission-mode", "auto",
-		"--print",
-		"--output-format", "stream-json",
-		"--verbose",
-		"--allowedTools", verifyAllowedTools,
-		"-p", prompt,
-	)
+	cmd := exec.Command(claudeBin, verifyClaudeArgs(buildVerifyPrompt(repo, prNumber, workDir, logs, customPrompt))...)
 	cmd.Dir = workDir
 	cmd.Env = env
 	resultText, err := runClaudeStreaming(cmd, out, newRedactor())

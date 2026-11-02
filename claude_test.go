@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -332,6 +333,120 @@ func TestBuildVerifyPromptWithCustomPrompt(t *testing.T) {
 			for _, want := range []string{"[Output protocol]", "VERIFY_DONE", "Hard rules"} {
 				if !strings.Contains(got, want) {
 					t.Errorf("invariant substring %q missing", want)
+				}
+			}
+		})
+	}
+}
+
+// flagValue returns the argument following flag in args, or "" if absent.
+func flagValue(args []string, flag string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// toolRules splits a --allowedTools/--disallowedTools value on spaces outside
+// parentheses, the way claude parses it.
+func toolRules(s string) []string {
+	var rules []string
+	depth, start := 0, 0
+	for i, r := range s + " " {
+		switch {
+		case r == '(':
+			depth++
+		case r == ')':
+			depth--
+		case r == ' ' && depth == 0:
+			if i > start {
+				rules = append(rules, s[start:i])
+			}
+			start = i + 1
+		}
+	}
+	return rules
+}
+
+func TestClaudeArgsPermissions(t *testing.T) {
+	builders := []struct {
+		name  string
+		build func(string) []string
+	}{
+		{"reviewClaudeArgs", reviewClaudeArgs},
+		{"verifyClaudeArgs", verifyClaudeArgs},
+	}
+	mustDeny := []string{
+		"Bash(gh api:*)", "Bash(gh pr comment:*)", "Bash(gh pr edit:*)", "Bash(gh pr merge:*)",
+		"Bash(gh gist:*)", "Bash(git push:*)", "Bash(git commit:*)", "Bash(git remote:*)",
+		"Bash(git config:*)", "Bash(npm publish:*)", "Bash(pnpm publish:*)", "Bash(yarn publish:*)",
+	}
+	mustNotAllow := []string{
+		"Bash(gh api:*)", "Bash(git remote:*)", "Bash(go:*)", "Bash(npm:*)", "Bash(pnpm:*)",
+		"Bash(yarn:*)", "Bash(mise:*)", "Bash(rg:*)", "Bash(fd:*)", "Bash(gh pr:*)", "Bash(git:*)",
+	}
+	for _, b := range builders {
+		t.Run(b.name, func(t *testing.T) {
+			args := b.build("prompt")
+			if got := flagValue(args, "--permission-mode"); got != "dontAsk" {
+				t.Errorf("%s: want --permission-mode dontAsk, got %q", b.name, got)
+			}
+			allowed := toolRules(flagValue(args, "--allowedTools"))
+			denied := toolRules(flagValue(args, "--disallowedTools"))
+			if len(allowed) == 0 {
+				t.Fatalf("%s: want a non-empty --allowedTools, got %v", b.name, args)
+			}
+			for _, d := range mustDeny {
+				if !slices.Contains(denied, d) {
+					t.Errorf("%s: want %s in --disallowedTools, got %v", b.name, d, denied)
+				}
+			}
+			for _, a := range mustNotAllow {
+				if slices.Contains(allowed, a) {
+					t.Errorf("%s: want %s absent from --allowedTools", b.name, a)
+				}
+			}
+			for _, a := range allowed {
+				if slices.Contains(denied, a) {
+					t.Errorf("%s: want %s in only one of allowed/denied", b.name, a)
+				}
+			}
+		})
+	}
+}
+
+func TestVerifyClaudeArgsAllowsPromptedTools(t *testing.T) {
+	// dontAsk denies anything unlisted, so every command the verify prompt
+	// tells Claude to run must stay allowed.
+	allowed := toolRules(flagValue(verifyClaudeArgs("p"), "--allowedTools"))
+	for _, want := range []string{
+		"Bash(gh run view:*)", "Bash(go test:*)", "Bash(go mod download:*)", "Bash(go get:*)",
+		"Bash(gofmt:*)", "Bash(golangci-lint:*)", "Bash(npm ci:*)", "Bash(npm run:*)",
+		"Bash(yarn run:*)", "Bash(pnpm run:*)", "Bash(npx prettier:*)", "Bash(npx eslint:*)",
+		"Bash(make:*)", "Bash(mise run:*)", "Read", "Write", "Edit", "Glob", "Grep",
+	} {
+		if !slices.Contains(allowed, want) {
+			t.Errorf("verifyClaudeArgs: want %s allowed, got %v", want, allowed)
+		}
+	}
+}
+
+func TestClaudeArgsPrompt(t *testing.T) {
+	huge := strings.Repeat("x", 1<<20)
+	for _, tc := range []struct {
+		name   string
+		prompt string
+	}{
+		{"normal", "review PR 1"},
+		{"empty", ""},
+		{"1MB", huge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, args := range [][]string{reviewClaudeArgs(tc.prompt), verifyClaudeArgs(tc.prompt)} {
+				if args[len(args)-2] != "-p" || args[len(args)-1] != tc.prompt {
+					t.Errorf("claudeArgs: want prompt as the final -p value, got len %d", len(args[len(args)-1]))
 				}
 			}
 		})
