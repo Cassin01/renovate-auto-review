@@ -4,9 +4,18 @@
 
 A Go script that enumerates open Renovate PRs from a GitHub repository
 specified on the command line. For each PR, it launches
-`claude --permission-mode auto` (Claude auto mode) so that Claude decides
-whether the PR is safe to merge and writes a review body; the tool then adds
-the duplicate-detection marker and footer and posts the comment on GitHub.
+`claude --permission-mode dontAsk` so that Claude decides whether the PR is
+safe to merge and writes a review body; the tool then adds the
+duplicate-detection marker and footer and posts the comment on GitHub.
+
+Every `claude` subprocess runs in `dontAsk` mode: only the tools in its
+`--allowedTools` list run and everything else is refused (no classifier
+fallback). A shared `--disallowedTools` list — GitHub writes (`gh api`,
+`gh pr comment|edit|merge`, `gh gist`, …), `git push|commit|remote|config`,
+package publishing, `curl`/`wget`, web tools — is denied on top, and deny rules
+win over any allow rule merged in from your or the target repo's settings. The
+review subprocess may only run `gh pr view|diff|checks` and write its comment
+file.
 
 ## Prerequisites
 
@@ -186,7 +195,12 @@ Behavior:
    every step of the job is re-run — including the formatter/linter over edited
    files — so a fix that breaks a previously-green step is caught before push.
    It writes a verdict to `rar-verify-result.json` — including the exact
-   `verified_commands` it ran and observed green — and prints `VERIFY_DONE`
+   `verified_commands` it ran and observed green — and prints `VERIFY_DONE`.
+   Its tool set is limited to read-only `gh`/`git`, the lint/build/test verbs
+   of the supported toolchains (`go build|test|vet|get|mod download`,
+   `gofmt`, `golangci-lint`, `npm ci|install|run|test`, `pnpm`/`yarn`
+   `install|run|test`, `npx prettier|eslint|stylelint`, `make`, `mise run`),
+   and the file tools — no `gh api`, `git remote`, `go run`, `npm exec`
 6. On a `fixed` verdict, the tool **re-runs each `verified_commands` entry
    itself** and refuses to publish unless all pass — turning the self-reported
    verdict into a machine-checked gate. Entries run **without a shell**, must
@@ -203,7 +217,13 @@ The verify phase enforces:
 
 - No `git commit --amend` / `git rebase` / `git reset --hard` /
   `git push --force` / `git push --force-with-lease`
-- No `gh pr edit`; commit/push/comment are disabled (the tool performs them)
+- No `gh pr edit`; commit/push/comment are denied (the tool performs them)
+- `.git/config` and `.git/hooks` must be unchanged from checkout: the tool
+  snapshots them before verify and, if they differ after re-verification,
+  aborts (→ `❌` comment, **no commit/push**). Publish runs `git` with your
+  `gh` credentials, so a planted hook, `core.fsmonitor`, `credential.helper`,
+  or `url.*.insteadOf` / `pushurl` rewrite would otherwise execute code or
+  redirect the push
 - Keep existing Renovate commits intact; add exactly one new commit on top
 - Only minor fixes are in scope (type fixes, test adjustments, lockfile
   regeneration); major breaking changes are out of scope
@@ -253,8 +273,12 @@ kept from leaking by two layers:
    AWS vars, and executes only allowlisted lint/build/test commands without a
    shell — `git`, `gh`, network clients, and publish/exec subcommands are
    rejected before execution.
-   *Ceiling:* those commands still execute repository code (npm scripts,
-   Makefile recipes, tests — including Claude's edits) as your OS user, which
+   *Ceiling:* `--allowedTools`/`--disallowedTools` gate only the commands
+   Claude runs directly. Because verify can edit files and run build/test
+   commands, it can still execute arbitrary code indirectly (edit a test or an
+   npm script, then run it). Likewise, the re-verification commands still
+   execute repository code (npm scripts, Makefile recipes, tests — including
+   Claude's edits) as your OS user, which
    can reach the registry token in its env and credentials stored on disk or in
    the keychain (`gh` keyring, git credential helper, `~/.aws`). Full isolation
    needs an OS-level sandbox (container, `sandbox-exec`), which this tool does
@@ -282,7 +306,7 @@ it** (official behavior). So while pushing is allowed, note that:
 - Renovate will not update that branch afterward, so whoever pushed becomes
   responsible for getting the PR merged
 
-The tool guards against this by excluding `gh pr edit` from `allowedTools`
+The tool guards against this by denying `gh pr edit` via `--disallowedTools`
 and by repeatedly forbidding it in the prompt, so **Claude** does not
 accidentally toggle the checkbox or attach the label during a CI auto-fix.
 
@@ -293,7 +317,7 @@ attaches the `rebase_label` to any Renovate PR whose `mergeable` state is
 `CONFLICTING`, so Renovate rebases/regenerates the branch and resolves the
 conflict. This is the inverse of the caveat above and is safe precisely because
 a pure-conflict PR has no tool-pushed commits to wipe out — Renovate stays the
-branch owner. Claude's `allowedTools` still excludes `gh pr edit`; only the
+branch owner. Claude's `--disallowedTools` still denies `gh pr edit`; only the
 gated, opt-in orchestrator path adds the label.
 
 If the target repository does not define `rebase_label` yet, the orchestrator
@@ -316,8 +340,10 @@ Both CI auto-fix and conflict handling are skipped under `-dry-run`.
 
 - Claude CLI usage costs scale with the number of PRs
 - PRs are processed sequentially; parallel execution is not supported
-- The auto-fix flow cannot block `git push --force` family commands via the
-  `allowedTools` prefix match, so it relies on the prompt's explicit prohibition
+- Claude's direct `git push` (including `--force`) is denied, and unlisted
+  forms such as `git -C . push` are refused by `dontAsk`. Code that Claude
+  writes and then runs through a build/test command is not covered by tool
+  rules (see the ceiling under *Private dependency registries*)
 - The process exits with code `1` whenever any PR-level step fails, even
   if other PRs in the same run succeeded. A non-zero exit signals "at least
   one PR failed", not "no work happened" — useful for cron alerts

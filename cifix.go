@@ -4,9 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
+	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -223,6 +226,10 @@ func runCIFix(run, reverify commandRunner, verify claudeVerifier, repo, marker, 
 	if o, err := run(workDir, "git", "checkout", pr.HeadRefName); err != nil {
 		return res, fmt.Errorf("git checkout %s: %w (output: %s)", pr.HeadRefName, err, strings.TrimSpace(string(o)))
 	}
+	gitBefore, err := gitMetadataSnapshot(workDir)
+	if err != nil {
+		return res, fmt.Errorf("snapshot git metadata: %w", err)
+	}
 
 	verdict, err := verify(workDir, logs, verifyEnv, out)
 	if err != nil {
@@ -252,6 +259,16 @@ func runCIFix(run, reverify commandRunner, verify claudeVerifier, repo, marker, 
 		}
 		_ = postCommentViaFile(run, workDir, repo, pr.Number, body)
 		return res, fmt.Errorf("re-verification gate: %w", rerr)
+	}
+
+	// Verify and re-verify both run repository code; publish runs git with the
+	// gh credentials, so a planted hook or remote rewrite must stop here.
+	if gitAfter, serr := gitMetadataSnapshot(workDir); serr != nil || gitAfter != gitBefore {
+		_ = postCommentViaFile(run, workDir, repo, pr.Number, buildGitTamperAbortCommentBody(marker))
+		if serr != nil {
+			return res, fmt.Errorf("aborted: git metadata unreadable after verification: %w", serr)
+		}
+		return res, errors.New("aborted: git metadata modified during verification")
 	}
 
 	statusOut, err := run(workDir, "git", "status", "--porcelain")
@@ -298,6 +315,36 @@ func runCIFix(run, reverify commandRunner, verify claudeVerifier, repo, marker, 
 	res.Pushed = true
 
 	return res, postCommentViaFile(run, workDir, repo, pr.Number, body)
+}
+
+// gitMetadataSnapshot serializes the repo-local git files that can make git
+// execute programs or redirect a push: .git/config (url.*.insteadOf, pushurl,
+// credential.helper, core.fsmonitor, core.hooksPath, ...) and every entry of
+// .git/hooks. Missing files serialize as empty; any other read error (e.g.
+// .git replaced by a gitdir file) is returned so the caller refuses to publish.
+// ponytail: repo-local only; ~/.gitconfig and other home-dir writes need an OS sandbox.
+func gitMetadataSnapshot(workDir string) (string, error) {
+	gitDir := filepath.Join(workDir, ".git")
+	var b strings.Builder
+	cfg, err := os.ReadFile(filepath.Join(gitDir, "config"))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	fmt.Fprintf(&b, "config\x00%d\x00%s", len(cfg), cfg)
+	hooks, err := os.ReadDir(filepath.Join(gitDir, "hooks"))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	for _, h := range hooks {
+		var data []byte
+		if !h.IsDir() {
+			if data, err = os.ReadFile(filepath.Join(gitDir, "hooks", h.Name())); err != nil {
+				return "", err
+			}
+		}
+		fmt.Fprintf(&b, "\x00hook\x00%s\x00%v\x00%d\x00%s", h.Name(), h.Type(), len(data), data)
+	}
+	return b.String(), nil
 }
 
 // credentialBasenames are filenames that commonly carry a literal credential.
@@ -348,7 +395,7 @@ func stageablePaths(porcelain string) []string {
 }
 
 // reverifyPrograms is the positive allowlist for re-verification commands: the
-// toolchain the verify phase is pre-approved to run (verifyAllowedTools), each
+// lint/build/test toolchain the verify phase runs (see verifyAllowedTools), each
 // limited to the subcommands that lint/build/test. A nil list allows any
 // arguments. Anything else — git, gh, curl, npx, publish/exec subcommands — is
 // rejected before execution.
@@ -589,6 +636,17 @@ func buildReverifyUnavailableCommentBody(marker, failedCmd string) string {
 		fmt.Fprintf(&b, "- **Unreachable during**: `%s`\n", failedCmd)
 	}
 	fmt.Fprintln(&b, "- **Detail**: the fix could not be independently re-verified because a build/test dependency (a network/DNS endpoint) was unavailable. This is an environment issue, not a fix rejection — re-run once the dependency is reachable.")
+	b.WriteString(commentFooter)
+	return b.String()
+}
+
+// buildGitTamperAbortCommentBody reports that .git/config or .git/hooks changed
+// between checkout and publish, so nothing was committed or pushed.
+func buildGitTamperAbortCommentBody(marker string) string {
+	var b strings.Builder
+	fmt.Fprintln(&b, marker)
+	fmt.Fprintln(&b, "## Claude auto-fix")
+	fmt.Fprintln(&b, "- **Verdict**: ❌ aborted — git metadata (`.git/config` or `.git/hooks`) modified during verification (no push)")
 	b.WriteString(commentFooter)
 	return b.String()
 }

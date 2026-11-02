@@ -3,7 +3,7 @@
 ## Project Overview
 
 A Go 1.26 CLI that enumerates open Renovate PRs in a target GitHub repository
-and invokes `claude --permission-mode auto` per PR so Claude decides whether
+and invokes `claude --permission-mode dontAsk` per PR so Claude decides whether
 the PR is safe to merge and posts a comment. Optionally auto-fixes failing CI.
 
 See `README.md` for usage, flags, and config schema.
@@ -38,14 +38,17 @@ cross-cutting code accumulate in `main.go`.
 * `config.example.toml` : Template for `~/.config/renovate-auto-review/config.toml`
 
 The CI auto-fix flow is **phase-split for token safety**: a verify phase
-(`claude`, scoped env, cannot commit/push/comment) and a publish phase
+(`claude`, scoped env, `dontAsk` with a narrow tool allowlist and a GitHub-write /
+publish denylist) and a publish phase
 (tool-driven, registry-token env stripped, staged-add with structural guards —
 untracked-directory skip + credential-name denylist — backed by the staged-diff
 secret scan, secret-scan abort). Between them is a **re-verification gate**: the tool
 independently re-runs the `verified_commands` Claude reported green (no shell,
 program/subcommand allowlist, verify env minus `gh`/Anthropic/AWS credentials)
 and refuses to publish unless all
-pass — the self-reported `fixed` verdict is not trusted on its own. A private
+pass — the self-reported `fixed` verdict is not trusted on its own. Publish
+also refuses if `.git/config` or `.git/hooks` changed since checkout (publish
+runs `git` with `gh` credentials). A private
 registry token is supplied via the environment only — never a config field. See
 `README.md` for the security model.
 
@@ -56,7 +59,8 @@ external CLIs. Both must be on `$PATH` for the binary to function.
 
 * `gh` v2.x — `gh auth status` must show the `repo` scope. All GitHub I/O
   goes through `github.go`.
-* `claude` — invoked with `--permission-mode auto`. All invocations go
+* `claude` — invoked with `--permission-mode dontAsk` plus explicit
+  `--allowedTools` / `--disallowedTools` (unlisted tools are refused). All invocations go
   through `claude.go`.
 
 **Tests must never invoke the real CLIs.** Use the existing seams: stub
