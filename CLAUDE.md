@@ -33,6 +33,9 @@ cross-cutting code accumulate in `main.go`.
 * `cifix.go`    : token-safe CI auto-fix — verify/publish phase split, re-verification gate, scoped/stripped env, secret scan
 * `redact.go`   : credential redaction for stdout + the pre-publish secret scan
 * `lockfile.go` : deterministic lockfile-only auto-fix path (no `claude`)
+* `conflict.go` : rebase requests for `CONFLICTING` PRs via the rebase label (no `claude`)
+* `guard.go`    : `allowed_owners` domain guard on the target repository owner
+* `color.go`    : ANSI coloring of the orchestrator's own output (honors `NO_COLOR`, TTY only)
 * `*_test.go`   : Tests, colocated with the file under test
 * `testdata/`   : Fixtures (golden outputs, stubbed CLI responses)
 * `config.example.toml` : Template for `~/.config/renovate-auto-review/config.toml`
