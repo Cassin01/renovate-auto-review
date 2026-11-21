@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -40,13 +41,14 @@ type Commit struct {
 	CommittedDate time.Time `json:"committedDate"`
 }
 
+// renovateLogin is the Mend-hosted Renovate GitHub App, the default author.
 const renovateLogin = "app/renovate"
 const renovateLabel = "renovate"
 
 // securityLabel is what Renovate's vulnerabilityAlerts PRs commonly carry
 // instead of renovateLabel: vulnerabilityAlerts.labels replaces the repo-level
 // labels list rather than merging into it. It is only trusted together with
-// the renovateLogin author check, since anyone with triage can add a label.
+// the bot author check, since anyone with triage can add a label.
 const securityLabel = "security"
 
 func listOpenPRs(repo string, limit int) ([]PR, error) {
@@ -90,8 +92,10 @@ func decodePR(raw []byte) (PR, error) {
 	return pr, nil
 }
 
-func isRenovatePR(pr PR) bool {
-	if !pr.Author.IsBot || pr.Author.Login != renovateLogin {
+func isRenovatePR(pr PR, authors []string) bool {
+	if !pr.Author.IsBot || !slices.ContainsFunc(authors, func(a string) bool {
+		return strings.EqualFold(a, pr.Author.Login)
+	}) {
 		return false
 	}
 	for _, l := range pr.Labels {

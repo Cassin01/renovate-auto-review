@@ -20,7 +20,8 @@ type Config struct {
 	WorkDir             string `toml:"work_dir"`
 	CustomPrompt        string `toml:"custom_prompt"`
 
-	AllowedOwners []string `toml:"allowed_owners"`
+	AllowedOwners   []string `toml:"allowed_owners"`
+	RenovateAuthors []string `toml:"renovate_authors"`
 
 	SourcePath string `toml:"-"`
 }
@@ -60,7 +61,22 @@ func loadConfig(path string) (*Config, error) {
 	}
 	cfg.SourcePath = path
 	applyConfigDefaults(&cfg)
+	if err := validateRenovateAuthors(cfg.RenovateAuthors); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return &cfg, nil
+}
+
+// validateRenovateAuthors accepts only GitHub App logins: an App login cannot
+// be used by any other account, which is what makes the author check trustworthy.
+func validateRenovateAuthors(authors []string) error {
+	for _, a := range authors {
+		slug, ok := strings.CutPrefix(a, "app/")
+		if !ok || slug == "" {
+			return fmt.Errorf("renovate_authors: %q must be a GitHub App login (\"app/<slug>\")", a)
+		}
+	}
+	return nil
 }
 
 func applyConfigDefaults(cfg *Config) {
@@ -75,6 +91,9 @@ func applyConfigDefaults(cfg *Config) {
 	}
 	if cfg.WorkDir == "" {
 		cfg.WorkDir = os.TempDir()
+	}
+	if len(cfg.RenovateAuthors) == 0 {
+		cfg.RenovateAuthors = []string{renovateLogin}
 	}
 }
 
@@ -123,4 +142,10 @@ auto_rebase_conflicts = false
 # Matched case-insensitively against the "owner" part of the "owner/name"
 # argument. Empty or unset = guard disabled (any owner allowed).
 # allowed_owners = ["Cassin01", "my-org"]
+
+# GitHub App logins whose PRs are treated as Renovate PRs (default
+# ["app/renovate"], the Mend-hosted app). For self-hosted Renovate running as
+# your own GitHub App, add "app/<your-app-slug>". Only "app/..." logins are
+# accepted; Renovate running under a personal access token is not supported.
+# renovate_authors = ["app/renovate", "app/my-renovate"]
 `

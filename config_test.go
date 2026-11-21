@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,47 +19,57 @@ func TestApplyConfigDefaults(t *testing.T) {
 		{
 			name: "zero limit filled",
 			in:   Config{Limit: 0},
-			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
+			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir(), RenovateAuthors: []string{renovateLogin}},
 		},
 		{
 			name: "negative limit filled",
 			in:   Config{Limit: -1},
-			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
+			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir(), RenovateAuthors: []string{renovateLogin}},
 		},
 		{
 			name: "values preserved",
 			in:   Config{Limit: 7},
-			want: Config{Limit: 7, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
+			want: Config{Limit: 7, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir(), RenovateAuthors: []string{renovateLogin}},
 		},
 		{
 			name: "empty filled",
 			in:   Config{},
-			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
+			want: Config{Limit: 50, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir(), RenovateAuthors: []string{renovateLogin}},
 		},
 		{
 			name: "auto-fix label preserved",
 			in:   Config{Limit: 10, AutoFixLabel: "custom-label"},
-			want: Config{Limit: 10, AutoFixLabel: "custom-label", RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
+			want: Config{Limit: 10, AutoFixLabel: "custom-label", RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir(), RenovateAuthors: []string{renovateLogin}},
 		},
 		{
 			name: "work_dir preserved",
 			in:   Config{Limit: 10, WorkDir: "/var/tmp"},
-			want: Config{Limit: 10, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: "/var/tmp"},
+			want: Config{Limit: 10, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: "/var/tmp", RenovateAuthors: []string{renovateLogin}},
 		},
 		{
 			name: "auto_fix_ci flag preserved",
 			in:   Config{Limit: 10, AutoFixCI: true},
-			want: Config{Limit: 10, AutoFixCI: true, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
+			want: Config{Limit: 10, AutoFixCI: true, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir(), RenovateAuthors: []string{renovateLogin}},
 		},
 		{
 			name: "rebase label preserved",
 			in:   Config{Limit: 10, RebaseLabel: "needs-rebase"},
-			want: Config{Limit: 10, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: "needs-rebase", WorkDir: os.TempDir()},
+			want: Config{Limit: 10, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: "needs-rebase", WorkDir: os.TempDir(), RenovateAuthors: []string{renovateLogin}},
 		},
 		{
 			name: "auto_rebase_conflicts flag preserved",
 			in:   Config{Limit: 10, AutoRebaseConflicts: true},
-			want: Config{Limit: 10, AutoRebaseConflicts: true, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir()},
+			want: Config{Limit: 10, AutoRebaseConflicts: true, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir(), RenovateAuthors: []string{renovateLogin}},
+		},
+		{
+			name: "renovate_authors preserved",
+			in:   Config{Limit: 10, RenovateAuthors: []string{"app/my-renovate"}},
+			want: Config{Limit: 10, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir(), RenovateAuthors: []string{"app/my-renovate"}},
+		},
+		{
+			name: "empty renovate_authors filled",
+			in:   Config{Limit: 10, RenovateAuthors: []string{}},
+			want: Config{Limit: 10, AutoFixLabel: defaultAutoFixLabel, RebaseLabel: defaultRebaseLabel, WorkDir: os.TempDir(), RenovateAuthors: []string{renovateLogin}},
 		},
 	}
 
@@ -171,6 +182,72 @@ func TestLoadConfig(t *testing.T) {
 			t.Errorf("CustomPrompt = %q, want %q", cfg.CustomPrompt, "コメントは日本語を使って")
 		}
 	})
+
+	t.Run("renovate_authors loaded", func(t *testing.T) {
+		cfg, err := loadConfig(filepath.Join("testdata", "renovate-authors.toml"))
+		if err != nil {
+			t.Fatalf("loadConfig: %v", err)
+		}
+		want := []string{"app/renovate", "app/my-renovate"}
+		if !reflect.DeepEqual(cfg.RenovateAuthors, want) {
+			t.Errorf("loadConfig: want RenovateAuthors %v, got %v", want, cfg.RenovateAuthors)
+		}
+	})
+
+	t.Run("renovate_authors unset defaults to app/renovate", func(t *testing.T) {
+		cfg, err := loadConfig(filepath.Join("testdata", "defaults.toml"))
+		if err != nil {
+			t.Fatalf("loadConfig: %v", err)
+		}
+		if want := []string{renovateLogin}; !reflect.DeepEqual(cfg.RenovateAuthors, want) {
+			t.Errorf("loadConfig: want RenovateAuthors %v, got %v", want, cfg.RenovateAuthors)
+		}
+	})
+
+	t.Run("renovate_authors many entries", func(t *testing.T) {
+		entries := make([]string, 1000)
+		for i := range entries {
+			entries[i] = fmt.Sprintf("%q", fmt.Sprintf("app/renovate-%d", i))
+		}
+		path := filepath.Join(t.TempDir(), "config.toml")
+		body := "renovate_authors = [" + strings.Join(entries, ", ") + "]\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := loadConfig(path)
+		if err != nil {
+			t.Fatalf("loadConfig: %v", err)
+		}
+		if len(cfg.RenovateAuthors) != 1000 {
+			t.Errorf("loadConfig: want 1000 RenovateAuthors, got %d", len(cfg.RenovateAuthors))
+		}
+	})
+
+	invalidAuthors := []struct {
+		name  string
+		entry string
+	}{
+		{name: "user login", entry: "renovate-bot"},
+		{name: "empty slug", entry: "app/"},
+		{name: "blank", entry: ""},
+		{name: "app prefix with different case", entry: "App/renovate"},
+	}
+	for _, tc := range invalidAuthors {
+		t.Run("renovate_authors invalid: "+tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.toml")
+			body := fmt.Sprintf("renovate_authors = [%q]\n", tc.entry)
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := loadConfig(path)
+			if err == nil {
+				t.Fatalf("loadConfig: want error for %q, got nil", tc.entry)
+			}
+			if !strings.Contains(err.Error(), "renovate_authors") {
+				t.Errorf("loadConfig: want error mentioning renovate_authors, got %v", err)
+			}
+		})
+	}
 
 	t.Run("unknown keys load successfully", func(t *testing.T) {
 		cfg, err := loadConfig(filepath.Join("testdata", "unknown-keys.toml"))
