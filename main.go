@@ -147,7 +147,7 @@ func processRepo(claudeBin, repo, marker string, cfg *Config, dryRun bool, prNum
 
 	var targets []PR
 	for _, pr := range prs {
-		if isRenovatePR(pr) {
+		if isRenovatePR(pr, cfg.RenovateAuthors) {
 			targets = append(targets, pr)
 		}
 	}

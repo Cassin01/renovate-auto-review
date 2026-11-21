@@ -25,6 +25,12 @@ limit = 50
 # argument. Empty or unset = guard disabled (any owner allowed).
 # allowed_owners = ["Cassin01", "my-org"]
 
+# GitHub App logins whose PRs are treated as Renovate PRs (default
+# ["app/renovate"], the Mend-hosted app). For self-hosted Renovate running as
+# your own GitHub App, add "app/<your-app-slug>". Only "app/..." logins are
+# accepted; Renovate running under a personal access token is not supported.
+# renovate_authors = ["app/renovate", "app/my-renovate"]
+
 # Private dependency registries: there is no config key for tokens by design.
 # Export the token in your shell before running (e.g. NODE_AUTH_TOKEN / NPM_TOKEN
 # / NPM_CONFIG_*). It is forwarded only to the verification phase and stripped

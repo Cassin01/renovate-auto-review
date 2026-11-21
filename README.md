@@ -54,6 +54,7 @@ The target repository is specified on the command line — see [Usage](#usage).
 | `work_dir`        | string   | `os.TempDir()`      | Parent directory for temporary work dirs used during CI auto-fix           |
 | `custom_prompt`   | string   | `""`                | Extra instructions appended to every Claude prompt (see below)             |
 | `allowed_owners`  | []string | `[]`                | Domain guard: allowed repository owners (see below). Empty = disabled       |
+| `renovate_authors` | []string | `["app/renovate"]` | GitHub App logins whose PRs count as Renovate PRs. Add `"app/<slug>"` for self-hosted Renovate (see [Renovate PR detection rules](#renovate-pr-detection-rules)) |
 
 Unknown keys produce a warning on stderr (helps catch typos).
 
@@ -125,15 +126,30 @@ single PR; if that PR is not a Renovate PR it is skipped.
 
 A PR is considered a Renovate PR when both of the following are true:
 
-1. `author.is_bot == true` and `author.login == "app/renovate"`
+1. `author.is_bot == true` and `author.login` is in `renovate_authors`
+   (case-insensitive; default `["app/renovate"]`, the Mend-hosted app)
 2. The PR labels include `renovate` or `security`
+
+Renovate sets no PR labels unless configured, so add `labels: ["renovate"]` to
+the Renovate config of the target repository.
 
 `security` is accepted because Renovate's vulnerability-fix PRs are commonly
 configured with `vulnerabilityAlerts.labels: ["security"]`, and `labels` is
 non-mergeable in Renovate: that list *replaces* the repository-level
 `labels: ["renovate"]`, so those PRs carry only `security`. The label never
 proves who opened the PR (anyone with triage permission can add it); rule 1
-does, since the `app/renovate` GitHub App login cannot be used by anyone else.
+does, since a GitHub App login cannot be used by anyone else.
+
+For self-hosted Renovate running as your own GitHub App, add its login
+(`app/<app-slug>`) to `renovate_authors`:
+
+```toml
+renovate_authors = ["app/renovate", "app/my-renovate"]
+```
+
+Only `app/...` logins are accepted; any other entry is a config error.
+Renovate running under a personal access token opens PRs as a regular user
+account, which anyone holding that token can also do, so it is not supported.
 
 ## Review skip rules
 

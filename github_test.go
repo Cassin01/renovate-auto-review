@@ -10,10 +10,65 @@ import (
 
 func TestIsRenovatePR(t *testing.T) {
 	cases := []struct {
-		name string
-		pr   PR
-		want bool
+		name    string
+		pr      PR
+		authors []string // nil means the default []string{renovateLogin}
+		want    bool
 	}{
+		{
+			name: "self-hosted app in authors",
+			pr: PR{
+				Author: Author{IsBot: true, Login: "app/my-renovate"},
+				Labels: []Label{{Name: renovateLabel}},
+			},
+			authors: []string{"app/my-renovate"},
+			want:    true,
+		},
+		{
+			name: "login matches second of multiple authors",
+			pr: PR{
+				Author: Author{IsBot: true, Login: "app/my-renovate"},
+				Labels: []Label{{Name: renovateLabel}},
+			},
+			authors: []string{renovateLogin, "app/my-renovate"},
+			want:    true,
+		},
+		{
+			name: "author entry matched case-insensitively",
+			pr: PR{
+				Author: Author{IsBot: true, Login: "app/my-renovate"},
+				Labels: []Label{{Name: renovateLabel}},
+			},
+			authors: []string{"app/My-Renovate"},
+			want:    true,
+		},
+		{
+			name: "empty authors matches nothing",
+			pr: PR{
+				Author: Author{IsBot: true, Login: renovateLogin},
+				Labels: []Label{{Name: renovateLabel}},
+			},
+			authors: []string{},
+			want:    false,
+		},
+		{
+			name: "self-hosted app login but not bot",
+			pr: PR{
+				Author: Author{IsBot: false, Login: "app/my-renovate"},
+				Labels: []Label{{Name: renovateLabel}},
+			},
+			authors: []string{"app/my-renovate"},
+			want:    false,
+		},
+		{
+			name: "default app not in custom authors",
+			pr: PR{
+				Author: Author{IsBot: true, Login: renovateLogin},
+				Labels: []Label{{Name: renovateLabel}},
+			},
+			authors: []string{"app/my-renovate"},
+			want:    false,
+		},
 		{
 			name: "bot + renovate label",
 			pr: PR{
@@ -113,7 +168,11 @@ func TestIsRenovatePR(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isRenovatePR(tc.pr); got != tc.want {
+			authors := tc.authors
+			if authors == nil {
+				authors = []string{renovateLogin}
+			}
+			if got := isRenovatePR(tc.pr, authors); got != tc.want {
 				t.Errorf("isRenovatePR() = %v, want %v", got, tc.want)
 			}
 		})
